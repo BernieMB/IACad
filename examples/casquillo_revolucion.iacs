@@ -1,0 +1,7 @@
+# Casquillo hueco por revolución: sección rectangular XY alrededor del eje Y.
+param.set radio_exterior=10mm radio_interior=5mm altura=20mm
+param.set name=giro value='360 deg' kind=angle
+sketch.new id=perfil plane=XY
+sketch.rectangle sketch=perfil id=pared center='["(radio_exterior + radio_interior)/2","altura/2"]' width='radio_exterior - radio_interior' height=altura
+feature.revolve id=casquillo profile=perfil axis='{"origin":[0,0,0],"dir":[0,1,0]}' angle=giro op=new_body body=principal
+check.add id=solido type=valid_solid target=principal

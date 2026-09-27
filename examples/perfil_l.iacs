@@ -1,0 +1,6 @@
+# Croquis XZ con normal -Y, extruido SIMETRICAMENTE 50 mm -> -25 <= Y <= 25.
+param.set largo=50mm espesor=5mm alto=55mm ancho=50mm
+sketch.new id=perfil plane=XZ
+sketch.polyline sketch=perfil id=p points='[[0,0],["largo",0],["largo","espesor"],["espesor","espesor"],["espesor","alto"],[0,"alto"]]'
+feature.extrude id=cuerpo profile=perfil extent=symmetric distance=ancho op=new_body body=principal
+check.add id=cotas type=bbox_max target=principal value=[50,50,55]

@@ -1,0 +1,8 @@
+# Placa paramétrica extruida de croquis 2D XY con hueco central Ø8.
+param.set largo=40mm ancho=30mm espesor=6mm radio=4mm
+sketch.new id=perfil plane=XY
+sketch.rectangle sketch=perfil id=exterior center=[20,15] width=largo height=ancho
+sketch.circle sketch=perfil id=orificio center=[20,15] radius=radio
+feature.extrude id=cuerpo profile=perfil distance=espesor op=new_body body=principal
+check.add id=solido type=valid_solid target=principal
+check.add id=cotas type=bbox_max target=principal value=[40,30,6]

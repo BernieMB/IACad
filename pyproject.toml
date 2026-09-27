@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "iacad"
+version = "0.1.0"
+description = "Motor CAD paramétrico headless para agentes de IA"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "build123d==0.13.0",
+  "pydantic>=2.10,<3",
+  "pint>=0.24,<1",
+  "typer>=0.15,<1",
+  "mcp>=1.9,<2",
+  "filelock>=3.16,<4",
+  "pillow>=11,<13",
+]
+
+[project.scripts]
+iacad = "iacad.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iacad"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

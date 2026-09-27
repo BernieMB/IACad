@@ -1,0 +1,12 @@
+Quiero hacer una aplicacion de CAD, tipo Autocad , 123D Design o incluso Fusion 360. La aplicacion tendrá herramientas de modelado 2D y 3D, edición de geometría, creación de ensamblajes, simulación y renderizado, así como soporte para importar y exportar distintos formatos de archivo CAD. Pero la particularidad de esta herramienta sera que NO tendra interfaz de usuario. Estara pensada para ser utilizada mediante comandos de texto o scripts, permitiendo ser usada de una forma sencilla por una IA (desde opencode). A parte de crear dicha herramienta, se creara un skill que permita a la IA interactuar con la aplicación de CAD de manera eficiente y automatizada. Los requisitos seran:
+- Lenguaje de programación: A decidir, pero debe ser adecuado para el desarrollo de aplicaciones de CAD y permitir la integración con scripts y comandos de texto.
+- Se creara un formato de archivo propio para almacenar los modelos CAD creados con la aplicación. Idealmente en texto plano.
+- La aplicación debe ser capaz de interpretar y ejecutar comandos de texto y scripts de manera eficiente, permitiendo a la IA interactuar con ella de forma automatizada.
+- Debe incluir un sistema de validación de comandos y scripts para asegurar que las operaciones realizadas sean correctas y no corrompan los modelos CAD.
+- La aplicación debe ser modular, permitiendo la adición de nuevas herramientas y funcionalidades sin necesidad de modificar el núcleo del programa.
+- Se debe proporcionar documentación detallada sobre los comandos y scripts disponibles, así como ejemplos de uso para facilitar la integración con la IA.
+- La aplicación debe incluir un sistema de registro y seguimiento de operaciones realizadas mediante comandos y scripts, para permitir la auditoría y depuración de las acciones ejecutadas por la IA.
+- Se creará un visor que permita visualizar los modelos CAD creados. Solo visor, no modificara los modelos.
+- La aplicación debe ser compatible con la integración de herramientas de simulación y renderizado, permitiendo a la IA realizar análisis y generar representaciones visuales de los modelos CAD sin necesidad de intervención manual.
+- La aplicación debe ser capaz de manejar grandes ensamblajes y modelos complejos de manera eficiente, asegurando un rendimiento adecuado incluso con estructuras CAD de gran tamaño.
+- La aplicacion deberá poder exportar los modelos a los distintos principales formatos de archivo CAD, como DWG, DXF, STL, STEP, entre otros.

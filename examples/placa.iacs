@@ -1,0 +1,8 @@
+# Ejemplo de rebanada vertical MVP: placa paramétrica 40×30×6 con orificio Ø8.
+param.set largo=40mm ancho=30mm espesor=6mm
+feature.box id=base body=principal length=largo width=ancho height=espesor
+feature.cylinder id=broca body=herramienta radius=4mm height=espesor origin=[20,15,0]
+feature.boolean id=orificio op=cut target=principal tools=herramienta
+check.add id=solido type=valid_solid target=principal
+check.add id=cotas type=bbox_max target=principal value=[40,30,6]
+check.add id=volumen type=volume_min target=principal value=6800

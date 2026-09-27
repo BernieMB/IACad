@@ -1,0 +1,28 @@
+{
+  "format": "iacad",
+  "format_version": "1.0",
+  "kind": "part",
+  "uid": "01M3HC1GX5M79SSDXG6R8YN8XS",
+  "name": "Perfil en L",
+  "revision": 0,
+  "units": {
+    "length": "mm",
+    "angle": "deg",
+    "mass": "g"
+  },
+  "metadata": {
+    "description": "",
+    "author": "",
+    "created": "2026-09-27T12:04:38Z",
+    "modified": "2026-09-27T12:04:38Z",
+    "tool_version": "iacad 0.1.0",
+    "tags": []
+  },
+  "parameters": [],
+  "properties": {},
+  "bodies": [],
+  "features": [],
+  "checks": [],
+  "configurations": [],
+  "extensions": {}
+}

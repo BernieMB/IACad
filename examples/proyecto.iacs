@@ -1,0 +1,5 @@
+# Ejecutar después de `iacad new proyecto.iacad --kind project --name "Placa"`.
+# La pieza se enlaza después con project.link, pasando el UID devuelto por iacad new.
+project.brief summary="Placa mecánica de 40x30x6 mm con un orificio Ø8" assumptions='["Cotas en mm"]'
+project.requirement id=REQ-1 text="La placa cabe en 40x30x6 mm"
+project.requirement id=REQ-2 text="Un orificio centrado Ø8 mm"

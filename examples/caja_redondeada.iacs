@@ -1,0 +1,5 @@
+# Ejemplo de referencias geométricas estables de una caja a través de cambios de cotas.
+param.set largo=40mm ancho=30mm alto=10mm radio=2mm
+feature.box id=base body=principal length=largo width=ancho height=alto
+feature.fillet id=esquina target=principal edges="@base/edge:xmax&ymax" expect=one radius=radio
+check.add id=solido type=valid_solid target=principal

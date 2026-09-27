@@ -1,0 +1,10 @@
+IACad - Copyright 2026 colaboradores de IACad.
+El código original se ofrece bajo Apache-2.0 (véase LICENSE).
+
+Dependencias principales de terceros (con sus licencias independientes):
+- build123d: Apache-2.0 (https://github.com/gumyr/build123d)
+- OCP (bindings): Apache-2.0 (https://github.com/CadQuery/OCP)
+- Open CASCADE Technology (librería OCCT distribuida con OCP): LGPL-2.1 con
+  excepción OCCT (https://dev.opencascade.org/)
+
+Este aviso no sustituye a los avisos incluidos con las distribuciones de terceros.
