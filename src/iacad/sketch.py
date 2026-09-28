@@ -40,6 +40,7 @@ SketchEntity = Annotated[Polyline | CircleEntity | RectangleEntity, Field(discri
 
 class SketchDefinition(StrictModel):
     plane: Literal["XY", "XZ", "YZ"]
+    offset: Quantity = 0.0
     entities: list[SketchEntity] = Field(default_factory=list)
     profiles: Literal["auto"] = "auto"
 
@@ -54,9 +55,10 @@ class SketchDefinition(StrictModel):
 def resolve(definition: SketchDefinition, evaluator: QuantityEvaluator) -> tuple[Sketch | None, dict]:
     """Primer contorno cerrado = exterior; los siguientes = huecos interiores."""
 
-    plane = PLANES[definition.plane]
+    offset = evaluator.length(definition.offset, path="args.offset")
+    plane = PLANES[definition.plane].offset(offset)
     if not definition.entities:
-        return None, {"plane": definition.plane, "entities": []}
+        return None, {"plane": definition.plane, "offset_mm": offset, "entities": []}
 
     shapes: list[Sketch] = []
     resolved: list[dict] = []
@@ -94,4 +96,4 @@ def resolve(definition: SketchDefinition, evaluator: QuantityEvaluator) -> tuple
         outer = outer - hole
     if not outer.is_valid or outer.area <= 0:
         raise CadError("PROFILE_INVALID", "Croquis sin una región cerrada válida")
-    return plane * outer, {"plane": definition.plane, "entities": resolved}
+    return plane * outer, {"plane": definition.plane, "offset_mm": offset, "entities": resolved}

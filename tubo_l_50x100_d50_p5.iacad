@@ -1,0 +1,71 @@
+{
+  "format": "iacad",
+  "format_version": "1.0",
+  "kind": "project",
+  "uid": "01M3JDJJ85ZDTW48X8QE4TBP24",
+  "name": "Tubo acodado en L 50 × 100 mm · Ø interior 50 mm",
+  "revision": 1,
+  "units": {
+    "length": "mm",
+    "angle": "deg",
+    "mass": "g"
+  },
+  "metadata": {
+    "description": "",
+    "author": "",
+    "created": "2026-09-27T21:50:40Z",
+    "modified": "2026-09-27T21:52:37Z",
+    "tool_version": "iacad 0.1.0",
+    "tags": []
+  },
+  "brief": {
+    "summary": "Tubo hueco acodado en L a 90°, diámetro interior 50 mm, pared 5 mm, tramos de eje central de 50 mm y 100 mm.",
+    "requirements": [
+      {
+        "id": "DIAMETRO-INTERIOR",
+        "text": "Diámetro interior de la sección 50 mm.",
+        "verified_by": [
+          "parts/tubo_l_50x100_d50_p5.iacad#codo"
+        ]
+      },
+      {
+        "id": "PARED",
+        "text": "Espesor radial de pared 5 mm; diámetro exterior 60 mm.",
+        "verified_by": [
+          "parts/tubo_l_50x100_d50_p5.iacad#codo"
+        ]
+      },
+      {
+        "id": "TRAMOS",
+        "text": "Tramos de eje central de 50 mm y 100 mm formando una L a 90°.",
+        "verified_by": [
+          "parts/tubo_l_50x100_d50_p5.iacad#codo"
+        ]
+      },
+      {
+        "id": "SOLIDO",
+        "text": "Un único sólido CAD válido y hueco.",
+        "verified_by": [
+          "parts/tubo_l_50x100_d50_p5.iacad#check:solido"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Longitudes de 50 y 100 mm medidas sobre el eje central desde cada extremo hasta el cruce teórico de ejes del codo.",
+      "Codo de 90° a inglete (sweep transition=right); no se indicó radio de curvatura.",
+      "Sin material asignado porque no se especificó."
+    ],
+    "open_questions": []
+  },
+  "parameters": [],
+  "documents": [
+    {
+      "path": "parts/tubo_l_50x100_d50_p5.iacad",
+      "kind": "part",
+      "uid": "01M3JDJJQ75YDCK8J7RY6QTCJE"
+    }
+  ],
+  "libraries": [],
+  "settings": {},
+  "extensions": {}
+}

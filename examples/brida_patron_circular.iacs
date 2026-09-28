@@ -1,0 +1,7 @@
+# Brida maciza cuadrada: cuatro taladros R2 en un círculo de pernos R15.
+param.set radio_pernos=15mm radio_taladro=2mm
+param.set name=giro value='360 deg' kind=angle
+feature.box id=placa body=principal length=50mm width=50mm height=5mm origin='[-25,-25,0]'
+feature.cylinder id=broca body=herramienta radius=radio_taladro height=5mm origin='["radio_pernos",0,0]'
+feature.pattern_circular id=taladros source=herramienta target=principal op=cut count=4 axis='{"origin":[0,0,0],"dir":[0,0,1]}' angle=giro
+check.add id=solido type=valid_solid target=principal

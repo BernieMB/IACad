@@ -1,0 +1,8 @@
+# Dos croquis XY paralelos, uno a 20 mm sobre el otro: cono truncado macizo.
+param.set radio_inferior=10mm radio_superior=5mm altura=20mm
+sketch.new id=base plane=XY
+sketch.circle sketch=base id=disco_inferior center='[0,0]' radius=radio_inferior
+sketch.new id=corona plane=XY offset=altura
+sketch.circle sketch=corona id=disco_superior center='[0,0]' radius=radio_superior
+feature.loft id=transicion sections='["base","corona"]' ruled=true op=new_body body=principal
+check.add id=solido type=valid_solid target=principal

@@ -41,17 +41,19 @@ def parse_script(text: str) -> list[dict]:
                     args["tools"] = args["tools"].split(",")
                 if name == "feature.extrude" and "distance" in args and not isinstance(args.get("extent"), dict):
                     args["extent"] = {"type": args.pop("extent", "distance"), "distance": args.pop("distance")}
-                if name in ("feature.fillet", "feature.chamfer") and isinstance(args.get("edges"), str) and "expect" in args:
-                    selection = args.pop("edges")
+                field = "remove_faces" if name == "feature.shell" else "edges"
+                if name in ("feature.fillet", "feature.chamfer", "feature.shell") and isinstance(args.get(field), str) and "expect" in args:
+                    selection = args.pop(field)
                     expect = args.pop("expect")
                     if selection.startswith("@"):
-                        args["edges"] = {"refs": [selection], "expect": expect}
+                        args[field] = {"refs": [selection], "expect": expect}
                     else:
-                        match = re.fullmatch(r"\?([a-z][a-z0-9_]*)/edges\[(.+)\]", selection)
+                        kind = "faces" if field == "remove_faces" else "edges"
+                        match = re.fullmatch(rf"\?([a-z][a-z0-9_]*)/{kind}\[(.+)\]", selection)
                         if match:
-                            args["edges"] = {"query": {"scope": match[1], "kind": "edge", "where": match[2]}, "expect": expect}
+                            args[field] = {"query": {"scope": match[1], "kind": "face" if field == "remove_faces" else "edge", "where": match[2]}, "expect": expect}
                         else:
-                            raise ValueError(f"Selección de arista no válida: {selection}")
+                            raise ValueError(f"Selección de {kind} no válida: {selection}")
                 commands.append({"cmd": name, "args": args})
         except (ValueError, json.JSONDecodeError) as exc:
             raise CadError("SCRIPT_SYNTAX", f"Línea {number} inválida", path=f"line:{number}", hint=str(exc)) from exc

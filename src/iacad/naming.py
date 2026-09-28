@@ -7,7 +7,7 @@ entidad, la selección falla en vez de apuntar silenciosamente a otra.
 import re
 from typing import Literal
 
-from build123d import Edge, Face, GeomType, Shape
+from build123d import CenterOf, Edge, Face, GeomType, Shape
 from pydantic import Field, model_validator
 
 from iacad.errors import CadError
@@ -54,12 +54,18 @@ def origins(document: PartDocument) -> dict[str, tuple[str, str]]:
     result: dict[str, tuple[str, str]] = {}
     for feature in document.features:
         args = feature.args
-        if feature.type in ("box", "cylinder") or (feature.type in ("extrude", "revolve") and args["op"] == "new_body"):
+        if feature.type in ("box", "cylinder") or (feature.type in ("extrude", "revolve", "loft", "sweep") and args["op"] == "new_body"):
             result[args["body"]] = (feature.id, feature.type)
         elif feature.type == "boolean" and not args["keep_tools"]:
             for tool in args["tools"]:
                 result.pop(tool, None)
-        elif feature.type not in ("sketch", "extrude", "revolve", "fillet", "chamfer", "boolean"):
+        elif feature.type in ("pattern_linear", "pattern_circular"):
+            result.pop(args["target"], None)
+            if not args["keep_tool"]:
+                result.pop(args["source"], None)
+        elif feature.type in ("shell", "sweep"):
+            result.pop(args["target"], None)
+        elif feature.type not in ("sketch", "extrude", "revolve", "loft", "sweep", "fillet", "chamfer", "shell", "boolean", "pattern_linear", "pattern_circular"):
             # Un plugin puede modificar cualquier cuerpo: no atribuirle caras de origen.
             result.clear()
     return result
@@ -90,7 +96,7 @@ def _roles(shape: Shape, kind: Literal["face", "edge"], origin: tuple[str, str] 
             if kind == "face" and entity.geom_type == GeomType.PLANE:
                 normal = entity.normal_at()
                 for index, axis in enumerate(AXES):
-                    center = tuple(entity.center())[index]
+                    center = tuple(entity.center(CenterOf.MASS))[index]
                     for direction, bound, sign in (("min", low[index], -1), ("max", high[index], 1)):
                         if abs(center - bound) <= tol and abs(tuple(normal)[index] - sign) <= 1e-5:
                             name = f"@{feature_id}/face:{axis.lower()}{direction}"
@@ -109,7 +115,7 @@ def _roles(shape: Shape, kind: Literal["face", "edge"], origin: tuple[str, str] 
             if entity.geom_type == GeomType.CYLINDER:
                 role = "side"
             elif entity.geom_type == GeomType.PLANE:
-                center_z = entity.center().Z
+                center_z = entity.center(CenterOf.MASS).Z
                 normal = entity.normal_at().Z
                 role = "top" if abs(center_z - high[2]) <= tol and normal > 0.99 else (
                     "bottom" if abs(center_z - low[2]) <= tol and normal < -0.99 else None
@@ -136,7 +142,7 @@ def _geometric_query(shape: Shape, kind: Literal["face", "edge"], where: str):
         operator, axis = token[0], AXES.index(token[1])
         if operator in "><":
             if entities:
-                coordinate = [tuple(entity.center())[axis] for entity in entities]
+                coordinate = [tuple(entity.center(CenterOf.MASS))[axis] for entity in entities]
                 extreme = max(coordinate) if operator == ">" else min(coordinate)
                 tol = _tol(shape)
                 entities = [entity for entity, value in zip(entities, coordinate, strict=True) if abs(value - extreme) <= tol]
@@ -211,7 +217,7 @@ def topology(bodies: dict[str, Shape], source: dict[str, tuple[str, str]], *, bo
                 # OCP puede devolver wrappers distintos para la misma topología: usar is_same.
                 ref = next((name for name, candidate in roles.items() if entity.is_same(candidate)), None)
                 record = {"body": body_id, "kind": entity_kind, "ref": ref, "geom_type": entity.geom_type.name,
-                          "center_mm": [round(value, 6) for value in entity.center()]}
+                          "center_mm": [round(value, 6) for value in entity.center(CenterOf.MASS)]}
                 if entity_kind == "face":
                     record.update({"area_mm2": round(entity.area, 6), "normal": [round(value, 6) for value in entity.normal_at()]})
                 else:

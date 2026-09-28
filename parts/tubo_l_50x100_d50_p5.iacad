@@ -1,0 +1,139 @@
+{
+  "format": "iacad",
+  "format_version": "1.0",
+  "kind": "part",
+  "uid": "01M3JDJJQ75YDCK8J7RY6QTCJE",
+  "name": "Tubo L Øi50 pared5 tramos50/100",
+  "revision": 1,
+  "units": {
+    "length": "mm",
+    "angle": "deg",
+    "mass": "g"
+  },
+  "metadata": {
+    "description": "",
+    "author": "",
+    "created": "2026-09-27T21:50:40Z",
+    "modified": "2026-09-27T21:52:03Z",
+    "tool_version": "iacad 0.1.0",
+    "tags": []
+  },
+  "parameters": [
+    {
+      "name": "diametro_interior",
+      "value": "50 mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    },
+    {
+      "name": "pared",
+      "value": "5 mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    },
+    {
+      "name": "largo_corto",
+      "value": "50 mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    },
+    {
+      "name": "largo_largo",
+      "value": "100 mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    }
+  ],
+  "properties": {},
+  "bodies": [
+    {
+      "id": "principal",
+      "export": true
+    }
+  ],
+  "features": [
+    {
+      "id": "seccion",
+      "type": "sketch",
+      "args": {
+        "plane": "XY",
+        "offset": 0.0,
+        "entities": [
+          {
+            "id": "exterior",
+            "type": "circle",
+            "center": [
+              0.0,
+              0.0
+            ],
+            "radius": "diametro_interior / 2 + pared"
+          },
+          {
+            "id": "hueco",
+            "type": "circle",
+            "center": [
+              0.0,
+              0.0
+            ],
+            "radius": "diametro_interior / 2"
+          }
+        ],
+        "profiles": "auto"
+      },
+      "name": "",
+      "notes": "",
+      "suppressed": false,
+      "tags": [],
+      "extensions": {}
+    },
+    {
+      "id": "codo",
+      "type": "sweep",
+      "args": {
+        "id": "codo",
+        "profile": "seccion",
+        "path": {
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              "largo_corto"
+            ],
+            [
+              "largo_largo",
+              0.0,
+              "largo_corto"
+            ]
+          ],
+          "transition": "right"
+        },
+        "op": "new_body",
+        "body": "principal"
+      },
+      "name": "",
+      "notes": "",
+      "suppressed": false,
+      "tags": [],
+      "extensions": {}
+    }
+  ],
+  "checks": [
+    {
+      "id": "solido",
+      "type": "valid_solid",
+      "target": "principal",
+      "severity": "error"
+    }
+  ],
+  "configurations": [],
+  "extensions": {}
+}

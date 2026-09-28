@@ -1,0 +1,5 @@
+# Caja abierta por arriba: el espesor es un parámetro editable en mm.
+param.set espesor=2mm
+feature.box id=base body=principal length=40mm width=30mm height=20mm
+feature.shell id=vaciado target=principal remove_faces="@base/face:zmax" expect=one thickness=espesor
+check.add id=solido type=valid_solid target=principal

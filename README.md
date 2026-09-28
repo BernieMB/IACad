@@ -1,6 +1,6 @@
 # IACad
 
-CAD paramétrico **sin interfaz de edición** para agentes que trabajan desde OpenCode. Ya permite crear proyectos con requisitos y piezas con primitivas, extrusión o revolución de croquis 2D, y exportarlas a STEP/STL/3MF/GLB. El historial editable se guarda en `.iacad` (JSON); los sólidos exportados y las mallas son derivados.
+CAD paramétrico **sin interfaz de edición** para agentes que trabajan desde OpenCode. Ya permite crear proyectos con requisitos y piezas con primitivas, extrusión, revolución, loft o barrido de croquis 2D, vaciado y patrones lineales/circulares de sólidos, y exportación a STEP/STL/3MF/GLB. El historial editable se guarda en `.iacad` (JSON); los sólidos exportados y las mallas son derivados.
 
 El diseño y las fases previstas están en [doc/Planning.md](doc/Planning.md), [doc/Modelo.md](doc/Modelo.md) y [doc/Requisitos.md](doc/Requisitos.md). Consulta [doc/Estado.md](doc/Estado.md) para saber exactamente qué funcionalidades ya funcionan.
 
@@ -51,6 +51,61 @@ uv run iacad export parts/casquillo.iacad --format step --out out/casquillo.step
 ```
 
 `feature.revolve` recibe un `axis` **explícito en coordenadas globales**, por ejemplo `{"origin":[0,0,0],"dir":[0,1,0]}`, y `angle` entre 0 y 360°. El eje debe estar en el plano del croquis; un perfil que lo atraviese se rechaza antes de guardarlo. El ejemplo gira un rectángulo XY a radios 5–10 mm sobre +Y: el volumen exacto esperado es `1500π mm³`. Declara giros editables con `param.set name=giro value="90 deg" kind=angle` (también admite `rad`); `query ... params` devuelve `parameters_deg` además de `parameters_mm`.
+
+### Loft entre croquis paralelos (cono truncado)
+
+```powershell
+uv run iacad new parts/cono.iacad --name "Cono truncado"
+uv run iacad exec parts/cono.iacad --script examples/cono_truncado.iacs
+uv run iacad render parts/cono.iacad --views four --out out/cono.png
+uv run iacad export parts/cono.iacad --format step --out out/cono.step
+```
+
+`sketch.new` admite `offset` en unidades de longitud: desplaza el croquis por la normal del plano (**XY → +Z**, **XZ → −Y**, **YZ → +X**). También afecta correctamente a extrusión y revolución; el eje de revolución debe estar en el plano **desplazado**. `feature.loft sections='["base","corona"]' ruled=true op=new_body body=principal` crea un sólido entre al menos dos secciones del **mismo tipo de plano**, con offsets distintos y ordenados. `ruled=true` (predeterminado) da caras rectas por tramos; `false` suaviza el paso entre tres o más secciones. Las secciones con huecos deben tener el mismo número de huecos; el kernel los empareja por proximidad y puede ser ambiguo cuando varios agujeros están muy juntos. El ejemplo une radios de 10 y 5 mm separados 20 mm: volumen exacto `3500π/3 mm³` (≈3665.19 mm³). El loft admite `op=new_body|join|cut|intersect` y se regenera al cambiar radios, altura u offsets.
+
+### Barrido por trayectoria 3D (tubo acodado)
+
+```powershell
+uv run iacad new parts/tubo.iacad --name "Tubo acodado"
+uv run iacad exec parts/tubo.iacad --script examples/tubo_acodado.iacs
+uv run iacad render parts/tubo.iacad --views four --out out/tubo.png
+uv run iacad export parts/tubo.iacad --format step --out out/tubo.step
+```
+
+`feature.sweep` barre un croquis cerrado (admite huecos) a lo largo de `path={"points":[[0,0,0],[0,0,10],[20,0,10]],"transition":"right"}`: **2–64 puntos globales 3D** con expresiones de longitud. El primer punto debe pertenecer al plano del croquis, incluso con `offset`, y el primer segmento debe seguir su normal (también en sentido inverso); se rechazan tramos de longitud nula. `transition="right"` (predeterminada) genera esquinas a inglete; `"round"` las redondea. No se expone la transición predeterminada `TRANSFORMED` de OCCT/build123d porque puede omitir tramos de una ruta en L sin dar error. El ejemplo barre una corona circular de radios 4 y 2 mm a lo largo de 10+20 mm: volumen exacto **360π mm³**. `op=new_body|join|cut|intersect` reutiliza las booleanas paramétricas. Este barrido utiliza rutas poligonales definidas en la feature; splines, guías y entidades de ruta independientes quedan para más adelante.
+
+### Patrón lineal de taladros o salientes
+
+```powershell
+uv run iacad new parts/patron.iacad --name "Placa con cuatro taladros"
+uv run iacad exec parts/patron.iacad --script examples/placa_patron_lineal.iacs
+uv run iacad render parts/patron.iacad --views four --out out/patron.png
+uv run iacad export parts/patron.iacad --format step --out out/patron.step
+```
+
+`feature.pattern_linear` usa un cuerpo-herramienta `source` ya creado, distinto del cuerpo `target`; admite `op=cut|join`, `count=2..64`, `spacing` positivo y `direction` 3D (se normaliza). **`count` incluye la primera instancia en la posición original**: el ejemplo talla 4 taladros de radio 2 mm en una placa de 60 × 20 × 5 mm con paso 12 mm, volumen `6000−80π mm³`. Por defecto `keep_tool=false` consume el cuerpo auxiliar (solo queda el destino); con `keep_tool=true` conserva ambos, lo cual afecta al requisito de un cuerpo para exportar. Cada copia debe modificar el destino y el resultado debe ser un solo sólido: una perforación fuera de la placa o un saliente sin conexión causa error y rollback. Tras el patrón se invalidan los `ref` semánticos del destino; vuelve a consultar `topology` antes de editar sus caras. Este primer patrón repite **el cuerpo-herramienta**, no una lista de features arbitrarias.
+
+### Patrón circular alrededor de un eje
+
+```powershell
+uv run iacad new parts/brida.iacad --name "Brida de cuatro taladros"
+uv run iacad exec parts/brida.iacad --script examples/brida_patron_circular.iacs
+uv run iacad render parts/brida.iacad --views four --out out/brida.png
+uv run iacad export parts/brida.iacad --format step --out out/brida.step
+```
+
+`feature.pattern_circular` también repite un **cuerpo-herramienta** contra `target`, con `op=cut|join`, `count=2..64`, `axis={"origin":[0,0,0],"dir":[0,0,1]}` global y `angle` parametrizable en grados o radianes. El eje no necesita estar dentro de un croquis, pero sí debe ser finito y no nulo. Con `angle=360 deg`, el paso es `360/count` y **no** se duplica la primera copia en 360°; con un arco menor se incluyen los dos extremos (`angle/(count-1)`). La herramienta original es la primera instancia, y se consume salvo `keep_tool=true`. El ejemplo hace 4 taladros R2 sobre un círculo de pernos R15 en una placa de 50 × 50 × 5 mm: volumen `12500−80π mm³`. Se comprueban efectos y validez de cada copia; si no corta o une, se revierte todo.
+
+### Vaciado de un sólido (caja abierta)
+
+```powershell
+uv run iacad new parts/caja_vaciada.iacad --name "Caja abierta"
+uv run iacad exec parts/caja_vaciada.iacad --script examples/caja_vaciada.iacs
+uv run iacad query parts/caja_vaciada.iacad summary
+uv run iacad export parts/caja_vaciada.iacad --format step --out out/caja_vaciada.step
+```
+
+`feature.shell` toma un cuerpo `target`, un `thickness` positivo y `remove_faces` con `expect` obligatorio. Admite `direction="inward"` (predeterminado: conserva las dimensiones exteriores) y `"outward"` (expande el exterior). El ejemplo abre `@base/face:zmax` en una caja de 40 × 30 × 20 mm con paredes de 2 mm; el volumen exacto es **7152 mm³**. Para seleccionar por geometría, usa `remove_faces='?principal/faces[+Z]' expect=one` o, desde JSON/MCP, `{"query":{"scope":"principal","kind":"face","where":"+Z"},"expect":"one"}`. El vaciado admite varias caras abiertas con `refs` y `expect` apropiado. **Después de vaciar, vuelve a consultar la topología:** las referencias semánticas de la primitiva se invalidan para no atribuir a la tapa retirada el nuevo aro de la abertura. Si el espesor es imposible, falla sin alterar la pieza.
 
 ### Inspeccionar y editar aristas
 

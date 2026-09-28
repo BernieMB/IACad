@@ -1,0 +1,6 @@
+# Cuatro taladros exactos con paso paramétrico: la broca es un cuerpo auxiliar.
+param.set largo=60mm radio=2mm paso=12mm
+feature.box id=placa body=principal length=largo width=20mm height=5mm
+feature.cylinder id=broca body=herramienta radius=radio height=5mm origin='[10,10,0]'
+feature.pattern_linear id=taladros source=herramienta target=principal op=cut count=4 spacing=paso direction='[1,0,0]'
+check.add id=solido type=valid_solid target=principal

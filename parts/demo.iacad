@@ -1,0 +1,140 @@
+{
+  "format": "iacad",
+  "format_version": "1.0",
+  "kind": "part",
+  "uid": "01M3HWJ6KXFP86S2WMFD1V3MSV",
+  "name": "Placa con orificio",
+  "revision": 1,
+  "units": {
+    "length": "mm",
+    "angle": "deg",
+    "mass": "g"
+  },
+  "metadata": {
+    "description": "",
+    "author": "",
+    "created": "2026-09-27T16:53:22Z",
+    "modified": "2026-09-27T16:53:37Z",
+    "tool_version": "iacad 0.1.0",
+    "tags": []
+  },
+  "parameters": [
+    {
+      "name": "largo",
+      "value": "40mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    },
+    {
+      "name": "ancho",
+      "value": "30mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    },
+    {
+      "name": "espesor",
+      "value": "6mm",
+      "kind": "length",
+      "group": "",
+      "description": ""
+    }
+  ],
+  "properties": {},
+  "bodies": [
+    {
+      "id": "principal",
+      "export": true
+    }
+  ],
+  "features": [
+    {
+      "id": "base",
+      "type": "box",
+      "args": {
+        "id": "base",
+        "body": "principal",
+        "length": "largo",
+        "width": "ancho",
+        "height": "espesor",
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "name": "",
+      "notes": "",
+      "suppressed": false,
+      "tags": [],
+      "extensions": {}
+    },
+    {
+      "id": "broca",
+      "type": "cylinder",
+      "args": {
+        "id": "broca",
+        "body": "herramienta",
+        "radius": "4mm",
+        "height": "espesor",
+        "origin": [
+          20.0,
+          15.0,
+          0.0
+        ]
+      },
+      "name": "",
+      "notes": "",
+      "suppressed": false,
+      "tags": [],
+      "extensions": {}
+    },
+    {
+      "id": "orificio",
+      "type": "boolean",
+      "args": {
+        "id": "orificio",
+        "op": "cut",
+        "target": "principal",
+        "tools": [
+          "herramienta"
+        ],
+        "keep_tools": false
+      },
+      "name": "",
+      "notes": "",
+      "suppressed": false,
+      "tags": [],
+      "extensions": {}
+    }
+  ],
+  "checks": [
+    {
+      "id": "solido",
+      "type": "valid_solid",
+      "target": "principal",
+      "severity": "error"
+    },
+    {
+      "id": "cotas",
+      "type": "bbox_max",
+      "target": "principal",
+      "value": [
+        40.0,
+        30.0,
+        6.0
+      ],
+      "severity": "error"
+    },
+    {
+      "id": "volumen",
+      "type": "volume_min",
+      "target": "principal",
+      "value": 6800.0,
+      "severity": "error"
+    }
+  ],
+  "configurations": [],
+  "extensions": {}
+}

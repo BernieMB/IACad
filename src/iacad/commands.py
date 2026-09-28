@@ -2,8 +2,8 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from math import isfinite
-from typing import Literal
+from math import hypot, isfinite
+from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError, model_validator
 
@@ -59,6 +59,43 @@ class BooleanArgs(StrictModel):
     keep_tools: bool = False
 
 
+class PatternLinearArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    target: str = Field(pattern=ID_PATTERN)
+    source: str = Field(pattern=ID_PATTERN)
+    op: Literal["cut", "join"] = "cut"
+    count: int = Field(ge=2, le=64)
+    spacing: Quantity
+    direction: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    keep_tool: bool = False
+
+    @model_validator(mode="after")
+    def valid_direction_and_bodies(self) -> "PatternLinearArgs":
+        if self.source == self.target:
+            raise ValueError("El cuerpo-herramienta debe ser distinto del destino")
+        norm = hypot(*self.direction)
+        if not all(isfinite(value) for value in self.direction) or not isfinite(norm) or norm <= 1e-6:
+            raise ValueError("La dirección del patrón debe ser finita y no nula")
+        return self
+
+
+class PatternCircularArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    target: str = Field(pattern=ID_PATTERN)
+    source: str = Field(pattern=ID_PATTERN)
+    op: Literal["cut", "join"] = "cut"
+    count: int = Field(ge=2, le=64)
+    axis: "RevolveAxis"
+    angle: Quantity = "360 deg"
+    keep_tool: bool = False
+
+    @model_validator(mode="after")
+    def different_bodies(self) -> "PatternCircularArgs":
+        if self.source == self.target:
+            raise ValueError("El cuerpo-herramienta debe ser distinto del destino")
+        return self
+
+
 class CheckAdd(StrictModel):
     id: str = Field(pattern=ID_PATTERN)
     type: Literal["valid_solid", "bbox_max", "volume_min"]
@@ -70,6 +107,7 @@ class CheckAdd(StrictModel):
 class SketchNewArgs(StrictModel):
     id: str = Field(pattern=ID_PATTERN)
     plane: Literal["XY", "XZ", "YZ"]
+    offset: Quantity = 0.0
 
 
 class SketchPolylineArgs(Polyline):
@@ -115,7 +153,8 @@ class RevolveAxis(StrictModel):
 
     @model_validator(mode="after")
     def valid_direction(self) -> "RevolveAxis":
-        if not all(isfinite(value) for value in self.dir) or sum(value * value for value in self.dir) <= 1e-12:
+        length = hypot(*self.dir)
+        if not all(isfinite(value) for value in self.dir) or not isfinite(length) or length <= 1e-6:
             raise ValueError("El eje debe tener una dirección 3D finita y no nula")
         return self
 
@@ -138,6 +177,47 @@ class RevolveArgs(StrictModel):
         return self
 
 
+class LoftArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    sections: list[Annotated[str, Field(pattern=ID_PATTERN)]] = Field(min_length=2)
+    ruled: bool = True
+    op: Literal["new_body", "join", "cut", "intersect"] = "new_body"
+    body: str | None = Field(default=None, pattern=ID_PATTERN)
+    target: str | None = Field(default=None, pattern=ID_PATTERN)
+
+    @model_validator(mode="after")
+    def valid_sections_and_target(self) -> "LoftArgs":
+        if len(set(self.sections)) != len(self.sections):
+            raise ValueError("Las secciones deben referirse a croquis diferentes")
+        if self.op == "new_body" and (not self.body or self.target):
+            raise ValueError("new_body requiere body y prohíbe target")
+        if self.op != "new_body" and (not self.target or self.body):
+            raise ValueError("join/cut/intersect requieren target y prohíben body")
+        return self
+
+
+class SweepPath(StrictModel):
+    points: list[tuple[Quantity, Quantity, Quantity]] = Field(min_length=2, max_length=64)
+    transition: Literal["right", "round"] = "right"
+
+
+class SweepArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    profile: str = Field(pattern=ID_PATTERN)
+    path: SweepPath
+    op: Literal["new_body", "join", "cut", "intersect"] = "new_body"
+    body: str | None = Field(default=None, pattern=ID_PATTERN)
+    target: str | None = Field(default=None, pattern=ID_PATTERN)
+
+    @model_validator(mode="after")
+    def operation_target(self) -> "SweepArgs":
+        if self.op == "new_body" and (not self.body or self.target):
+            raise ValueError("new_body requiere body y prohíbe target")
+        if self.op != "new_body" and (not self.target or self.body):
+            raise ValueError("join/cut/intersect requieren target y prohíben body")
+        return self
+
+
 class FilletArgs(StrictModel):
     id: str = Field(pattern=ID_PATTERN)
     target: str = Field(pattern=ID_PATTERN)
@@ -150,6 +230,14 @@ class ChamferArgs(StrictModel):
     target: str = Field(pattern=ID_PATTERN)
     edges: Selection
     distance: Quantity
+
+
+class ShellArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    target: str = Field(pattern=ID_PATTERN)
+    remove_faces: Selection
+    thickness: Quantity
+    direction: Literal["inward", "outward"] = "inward"
 
 
 class ProjectBriefArgs(StrictModel):
@@ -254,6 +342,37 @@ def feature_boolean(doc: PartDocument, args: BooleanArgs) -> str:
     return args.id
 
 
+@register(
+    "feature.pattern_linear", PatternLinearArgs,
+    "Repite un cuerpo-herramienta contra un destino (cut/join); incluye la posición original.",
+    {"id": "perforaciones", "source": "broca", "target": "principal", "op": "cut", "count": 4,
+     "spacing": "12 mm", "direction": [1, 0, 0]},
+)
+def feature_pattern_linear(doc: PartDocument, args: PatternLinearArgs) -> str:
+    return add_pattern(doc, args, "pattern_linear")
+
+
+@register(
+    "feature.pattern_circular", PatternCircularArgs,
+    "Repite un cuerpo-herramienta sobre eje global (cut/join); 360 grados no repite el inicio.",
+    {"id": "perforaciones", "source": "broca", "target": "principal", "op": "cut", "count": 4,
+     "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "360 deg"},
+)
+def feature_pattern_circular(doc: PartDocument, args: PatternCircularArgs) -> str:
+    return add_pattern(doc, args, "pattern_circular")
+
+
+def add_pattern(doc: PartDocument, args: PatternLinearArgs | PatternCircularArgs, kind: str) -> str:
+    if any(feature.id == args.id for feature in doc.features):
+        raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
+    if args.target not in {body.id for body in doc.bodies} or args.source not in {body.id for body in doc.bodies}:
+        raise CadError("UNKNOWN_BODY", "El patrón requiere destino y cuerpo-herramienta existentes", path="args.source")
+    doc.features.append(Feature(id=args.id, type=kind, args=args.model_dump()))
+    if not args.keep_tool:
+        doc.bodies = [body for body in doc.bodies if body.id != args.source]
+    return args.id
+
+
 @register("check.add", CheckAdd, "Añadir comprobación geométrica al documento.", {"id": "ancho_max", "type": "bbox_max", "target": "principal", "value": [50, 50, 10]})
 def check_add(doc: PartDocument, args: CheckAdd) -> str:
     if any(check["id"] == args.id for check in doc.checks):
@@ -269,13 +388,14 @@ def check_add(doc: PartDocument, args: CheckAdd) -> str:
 
 
 @register(
-    "sketch.new", SketchNewArgs, "Crea un croquis 2D en plano XY, XZ o YZ.",
-    {"id": "perfil", "plane": "XY"},
+    "sketch.new", SketchNewArgs, "Crea un croquis 2D en XY, XZ o YZ, desplazado sobre su normal.",
+    {"id": "perfil", "plane": "XY", "offset": "20 mm"},
 )
 def sketch_new(doc: PartDocument, args: SketchNewArgs) -> str:
     if any(feature.id == args.id for feature in doc.features):
         raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
-    doc.features.append(Feature(id=args.id, type="sketch", args=SketchDefinition(plane=args.plane).model_dump()))
+    doc.features.append(Feature(id=args.id, type="sketch",
+                                args=SketchDefinition(plane=args.plane, offset=args.offset).model_dump()))
     return args.id
 
 
@@ -331,11 +451,31 @@ def feature_revolve(doc: PartDocument, args: RevolveArgs) -> str:
     return add_profile_feature(doc, args, "revolve")
 
 
-def add_profile_feature(doc: PartDocument, args: ExtrudeArgs | RevolveArgs, kind: str) -> str:
+@register(
+    "feature.loft", LoftArgs, "Une al menos dos croquis paralelos y ordenados en un sólido.",
+    {"id": "transicion", "sections": ["base", "corona"], "ruled": True,
+     "op": "new_body", "body": "principal"},
+)
+def feature_loft(doc: PartDocument, args: LoftArgs) -> str:
+    return add_profile_feature(doc, args, "loft")
+
+
+@register(
+    "feature.sweep", SweepArgs, "Barre un croquis cerrado por ruta 3D en segmentos, iniciada en su plano.",
+    {"id": "tubo", "profile": "seccion", "path": {"points": [[0, 0, 0], [0, 0, 10], [20, 0, 10]],
+                                                  "transition": "right"}, "body": "principal"},
+)
+def feature_sweep(doc: PartDocument, args: SweepArgs) -> str:
+    return add_profile_feature(doc, args, "sweep")
+
+
+def add_profile_feature(doc: PartDocument, args: ExtrudeArgs | RevolveArgs | LoftArgs | SweepArgs, kind: str) -> str:
     if any(feature.id == args.id for feature in doc.features):
         raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
-    if not any(feature.id == args.profile and feature.type == "sketch" for feature in doc.features):
-        raise CadError("UNKNOWN_SKETCH", "La operación necesita un croquis anterior", path="args.profile")
+    profiles = args.sections if isinstance(args, LoftArgs) else [args.profile]
+    if any(not any(feature.id == profile and feature.type == "sketch" for feature in doc.features)
+           for profile in profiles):
+        raise CadError("UNKNOWN_SKETCH", "La operación necesita croquis anteriores", path="args.sections" if kind == "loft" else "args.profile")
     if args.op == "new_body":
         if any(body.id == args.body for body in doc.bodies):
             raise CadError("DUPLICATE_ID", "El cuerpo de salida ya existe", path="args.body")
@@ -346,7 +486,7 @@ def add_profile_feature(doc: PartDocument, args: ExtrudeArgs | RevolveArgs, kind
     return args.id
 
 
-def add_dressup(doc: PartDocument, args: FilletArgs | ChamferArgs, kind: str) -> str:
+def add_dressup(doc: PartDocument, args: FilletArgs | ChamferArgs | ShellArgs, kind: str) -> str:
     if any(feature.id == args.id for feature in doc.features):
         raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
     if args.target not in {body.id for body in doc.bodies}:
@@ -369,6 +509,15 @@ def feature_fillet(doc: PartDocument, args: FilletArgs) -> str:
 )
 def feature_chamfer(doc: PartDocument, args: ChamferArgs) -> str:
     return add_dressup(doc, args, "chamfer")
+
+
+@register(
+    "feature.shell", ShellArgs, "Vacía un cuerpo con espesor constante, abriendo las caras seleccionadas.",
+    {"id": "vaciado", "target": "principal", "remove_faces": {"refs": ["@base/face:zmax"], "expect": "one"},
+     "thickness": "2 mm", "direction": "inward"},
+)
+def feature_shell(doc: PartDocument, args: ShellArgs) -> str:
+    return add_dressup(doc, args, "shell")
 
 
 @register(

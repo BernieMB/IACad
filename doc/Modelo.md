@@ -304,6 +304,7 @@ Objeto usado donde una operación necesita caras, aristas, vértices o cuerpos:
   "id": "perfil", "type": "sketch",
   "args": {
     "plane": "XZ",
+    "offset": "0 mm",
     "entities": [
       { "id": "p",  "type": "polyline", "closed": true, "points": [[0, 0], ["largo", 0], ["largo", "espesor"]] },
       { "id": "c1", "type": "circle", "center": [10, 10], "radius": "d/2" },
@@ -325,6 +326,7 @@ Objeto usado donde una operación necesita caras, aristas, vértices o cuerpos:
 - **Subpuntos**: `.start`, `.end`, `.center`, `.mid`.
 - **Restricciones** (Fase posterior, solver PlaneGCS): `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `tangent`, `equal`, `concentric`, `midpoint`, `symmetric`, `fix`, `distance`, `angle`, `radius`, `diameter`. En el MVP la geometría se define con coordenadas paramétricas explícitas.
 - **`profiles`**: `"auto"` toma los contornos cerrados con la regla par-impar (exterior con huecos). También se pueden listar de forma explícita: `[{ "id": "ext", "outer": ["p"], "holes": ["c1"] }]`.
+- **`offset`**: distancia opcional en unidades de longitud sobre la normal del plano base (XY: +Z, XZ: −Y, YZ: +X); se puede expresar como parámetro. El loft implementado une solo secciones del mismo tipo de plano, con offsets estrictamente ordenados.
 
 ### 8.4 Argumentos de las features principales
 ```jsonc
@@ -343,6 +345,14 @@ Objeto usado donde una operación necesita caras, aristas, vértices o cuerpos:
 { "profile": "perfil", "axis": { "origin": [0,0,0], "dir": [0,0,1] } /* o Selection de arista o datum */,
   "angle": "360 deg", "op": "new_body", "body": "eje" }
 
+// loft (implementado para croquis paralelos XY/XZ/YZ con offset ordenado)
+{ "sections": ["base", "corona"], "ruled": true,
+  "op": "new_body", "body": "principal" }  // o join/cut/intersect con target
+
+// sweep (implementado para polilínea global; primer tramo normal al croquis)
+{ "profile": "seccion", "path": {"points": [[0,0,0],[0,0,10],[20,0,10]],
+    "transition": "right"}, "op": "new_body", "body": "principal" }
+
 // fillet / chamfer
 { "edges": <Selection>, "radius": "2 mm" }
 { "edges": <Selection>, "distance": "1 mm", "distance2": null, "angle": null }
@@ -359,7 +369,15 @@ Objeto usado donde una operación necesita caras, aristas, vértices o cuerpos:
 // shell
 { "target": "principal", "remove_faces": <Selection>, "thickness": "2 mm", "direction": "inward" }
 
-// pattern_linear / pattern_circular
+// pattern_linear (MVP implementado: repite un cuerpo-herramienta sobre un destino)
+{ "source": "broca", "target": "principal", "op": "cut", "count": 4,
+  "spacing": "12 mm", "direction": [1,0,0], "keep_tool": false }
+
+// pattern_circular (implementado: cuerpo-herramienta; 360° sin copia duplicada)
+{ "source": "broca", "target": "principal", "op": "cut", "count": 4,
+  "axis": {"origin": [0,0,0], "dir": [0,0,1]}, "angle": "360 deg", "keep_tool": false }
+
+// patrones de features arbitrarias (planeados)
 { "features": ["taladro"], "direction": [1,0,0], "count": 4, "spacing": "20 mm" }
 { "features": ["taladro"], "axis": { "origin": [0,0,0], "dir": [0,0,1] }, "count": 6, "angle": "360 deg" }
 

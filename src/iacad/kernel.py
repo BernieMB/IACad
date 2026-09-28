@@ -1,7 +1,8 @@
 """Adaptador mínimo del kernel: B-Rep exacto sin API de build123d expuesta a agentes."""
 
-from collections.abc import Callable, Mapping
-from math import sqrt
+from collections.abc import Callable, Iterable, Mapping
+from itertools import pairwise
+from math import hypot
 from pathlib import Path
 
 from build123d import (
@@ -10,16 +11,21 @@ from build123d import (
     Box,
     Cylinder,
     Mesher,
+    Polyline,
     Pos,
     Shape,
     Sketch,
+    Transition,
     chamfer,
     export_gltf,
     export_step,
     export_stl,
     extrude,
     fillet,
+    loft,
+    offset,
     revolve,
+    sweep,
 )
 
 from iacad.cache import GeometryCache
@@ -30,7 +36,12 @@ from iacad.commands import (
     CylinderArgs,
     ExtrudeArgs,
     FilletArgs,
+    LoftArgs,
+    PatternCircularArgs,
+    PatternLinearArgs,
     RevolveArgs,
+    ShellArgs,
+    SweepArgs,
 )
 from iacad.errors import CadError
 from iacad.model import Feature, PartDocument
@@ -69,7 +80,26 @@ class KernelAdapter:
     """Punto de reemplazo de build123d; se mantiene fuera de documento/comandos."""
 
     @staticmethod
-    def _profile_solid(feature: Feature, args: ExtrudeArgs | RevolveArgs, build: Callable[[], Shape],
+    def _pattern_boolean(target: Shape, instances: Iterable[Shape], op: str) -> Shape:
+        result = target
+        for index, tool in enumerate(instances, start=1):
+            try:
+                updated = result - tool if op == "cut" else result + tool
+            except Exception as exc:
+                raise CadError("PATTERN_FAILED", f"Falló la instancia {index}", hint=str(exc)) from exc
+            if not updated.is_valid or len(updated.solids()) != 1 or updated.volume <= 0:
+                raise CadError("PATTERN_DISCONNECTED" if op == "join" else "PATTERN_FAILED",
+                               f"La instancia {index} no produce un sólido único y válido",
+                               hint="Acerca la herramienta al destino o ajusta el paso")
+            change = (result.volume - updated.volume) if op == "cut" else (updated.volume - result.volume)
+            if change <= max(1e-7, result.volume * 1e-9):
+                raise CadError("PATTERN_NO_EFFECT", f"La instancia {index} no modifica el destino",
+                               hint="Revisa la posición de la herramienta, dirección y paso")
+            result = updated
+        return result
+
+    @staticmethod
+    def _profile_solid(feature: Feature, args: ExtrudeArgs | RevolveArgs | LoftArgs | SweepArgs, build: Callable[[], Shape],
                        definition: dict, bodies: dict[str, Shape], keys: dict[str, str | None],
                        owners: dict[str, tuple[str, str]], cache: GeometryCache | None) -> Shape:
         if args.op == "new_body":
@@ -195,6 +225,71 @@ class KernelAdapter:
                             del bodies[tool]
                             del keys[tool]
                             owners.pop(tool, None)
+                elif feature.type == "pattern_linear":
+                    args = PatternLinearArgs.model_validate(feature.args)
+                    if args.target not in bodies or args.source not in bodies:
+                        raise CadError("UNKNOWN_BODY", "El patrón requiere dos cuerpos anteriores distintos",
+                                       path="args.source")
+                    spacing = positive(evaluator, args.spacing, "args.spacing")
+                    norm = hypot(*args.direction)
+                    direction = tuple(value / norm for value in args.direction)
+
+                    def build_pattern(target=bodies[args.target], tool=bodies[args.source],
+                                      count=args.count, step=spacing, vector=direction, op=args.op):
+                        copies = (Pos(*(instance * step * coordinate for coordinate in vector)) * tool
+                                  for instance in range(count))
+                        return self._pattern_boolean(target, copies, op)
+
+                    previous, source_key = keys[args.target], keys[args.source]
+                    definition = {"type": "pattern_linear", "id": feature.id, "target_key": previous,
+                                  "source_key": source_key, "op": args.op, "count": args.count,
+                                  "spacing_mm": spacing, "direction": direction}
+                    if cache is None or previous is None or source_key is None:
+                        shape, key = build_pattern(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_pattern)
+                    bodies[args.target] = shape
+                    keys[args.target] = key
+                    owners.pop(args.target, None)
+                    if not args.keep_tool:
+                        del bodies[args.source]
+                        del keys[args.source]
+                        owners.pop(args.source, None)
+                elif feature.type == "pattern_circular":
+                    args = PatternCircularArgs.model_validate(feature.args)
+                    if args.target not in bodies or args.source not in bodies:
+                        raise CadError("UNKNOWN_BODY", "El patrón requiere dos cuerpos anteriores distintos",
+                                       path="args.source")
+                    angle = evaluator.angle(args.angle, path="args.angle")
+                    if not 0 < angle <= 360:
+                        raise CadError("INVALID_ANGLE", "El patrón requiere 0 < ángulo <= 360 deg", path="args.angle")
+                    origin = tuple(evaluator.length(value, path=f"args.axis.origin[{i}]")
+                                   for i, value in enumerate(args.axis.origin))
+                    norm = hypot(*args.axis.dir)
+                    direction = tuple(value / norm for value in args.axis.dir)
+                    step = angle / (args.count if angle == 360 else args.count - 1)
+
+                    def build_pattern(target=bodies[args.target], tool=bodies[args.source],
+                                      count=args.count, increment=step, center=origin, vector=direction, op=args.op):
+                        axis = Axis(center, vector)
+                        copies = (tool.rotate(axis, instance * increment) for instance in range(count))
+                        return self._pattern_boolean(target, copies, op)
+
+                    previous, source_key = keys[args.target], keys[args.source]
+                    definition = {"type": "pattern_circular", "id": feature.id, "target_key": previous,
+                                  "source_key": source_key, "op": args.op, "count": args.count,
+                                  "axis_origin_mm": origin, "axis_dir": direction, "angle_deg": angle}
+                    if cache is None or previous is None or source_key is None:
+                        shape, key = build_pattern(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_pattern)
+                    bodies[args.target] = shape
+                    keys[args.target] = key
+                    owners.pop(args.target, None)
+                    if not args.keep_tool:
+                        del bodies[args.source]
+                        del keys[args.source]
+                        owners.pop(args.source, None)
                 elif feature.type == "extrude":
                     args = ExtrudeArgs.model_validate(feature.args)
                     if args.profile not in sketches:
@@ -227,10 +322,10 @@ class KernelAdapter:
                     if not 0 < angle <= 360:
                         raise CadError("INVALID_ANGLE", "La revolución requiere 0 < ángulo <= 360 deg", path="args.angle")
                     axis_origin = tuple(evaluator.length(coord, path="args.axis.origin") for coord in args.axis.origin)
-                    length = sqrt(sum(coord * coord for coord in args.axis.dir))
+                    length = hypot(*args.axis.dir)
                     axis_dir = tuple(coord / length for coord in args.axis.dir)
                     plane_normal = tuple(PLANES[profile_key["plane"]].z_dir)
-                    if abs(_dot3(axis_origin, plane_normal)) > 1e-6 or abs(_dot3(axis_dir, plane_normal)) > 1e-7:
+                    if abs(_dot3(axis_origin, plane_normal) - profile_key["offset_mm"]) > 1e-6 or abs(_dot3(axis_dir, plane_normal)) > 1e-7:
                         raise CadError("AXIS_NOT_IN_SKETCH_PLANE", "El eje de revolución debe estar en el plano del croquis", path="args.axis")
                     side = (axis_dir[1] * plane_normal[2] - axis_dir[2] * plane_normal[1],
                             axis_dir[2] * plane_normal[0] - axis_dir[0] * plane_normal[2],
@@ -251,6 +346,81 @@ class KernelAdapter:
                                   "sketch": profile_key, "axis_origin_mm": axis_origin,
                                   "axis_dir": axis_dir, "angle_deg": angle}
                     shape = self._profile_solid(feature, args, build_revolve, definition, bodies, keys, owners, cache)
+                elif feature.type == "loft":
+                    args = LoftArgs.model_validate(feature.args)
+                    sections = []
+                    keys_for_sections = []
+                    for sketch_id in args.sections:
+                        if sketch_id not in sketches:
+                            raise CadError("UNKNOWN_SKETCH", "El loft necesita croquis anteriores", path="args.sections")
+                        profile, profile_key = sketches[sketch_id]
+                        if profile is None or len(profile.faces()) != 1:
+                            raise CadError("PROFILE_INVALID", "Cada sección debe contener una región cerrada",
+                                           path="args.sections")
+                        sections.append(profile)
+                        keys_for_sections.append(profile_key)
+                    planes = {key["plane"] for key in keys_for_sections}
+                    if len(planes) != 1:
+                        raise CadError("PROFILE_PLANES_MISMATCH", "Las secciones deben usar planos paralelos del mismo tipo",
+                                       path="args.sections")
+                    offsets = [key["offset_mm"] for key in keys_for_sections]
+                    steps = [b - a for a, b in pairwise(offsets)]
+                    if not (all(step > 1e-6 for step in steps) or all(step < -1e-6 for step in steps)):
+                        raise CadError("SECTIONS_NOT_ORDERED", "Las secciones deben tener offsets distintos y ordenados",
+                                       path="args.sections", hint="Ordénalas por offset a lo largo de la normal del plano")
+                    holes = {len(key["entities"]) - 1 for key in keys_for_sections}
+                    if len(holes) != 1:
+                        raise CadError("PROFILE_HOLES_MISMATCH", "Todas las secciones deben tener igual número de huecos",
+                                       path="args.sections")
+
+                    def build_loft(profiles=tuple(sections), ruled=args.ruled):
+                        try:
+                            return loft(profiles, ruled=ruled)
+                        except Exception as exc:
+                            raise CadError("LOFT_FAILED", "El kernel no pudo unir las secciones",
+                                           path="args.sections", hint=str(exc)) from exc
+
+                    definition = {"type": "loft", "id": feature.id,
+                                  "sections": [{"sketch": name, "profile": key}
+                                               for name, key in zip(args.sections, keys_for_sections, strict=True)],
+                                  "ruled": args.ruled}
+                    shape = self._profile_solid(feature, args, build_loft, definition, bodies, keys, owners, cache)
+                elif feature.type == "sweep":
+                    args = SweepArgs.model_validate(feature.args)
+                    if args.profile not in sketches:
+                        raise CadError("UNKNOWN_SKETCH", "El barrido necesita un croquis anterior", path="args.profile")
+                    profile, profile_key = sketches[args.profile]
+                    if profile is None or len(profile.faces()) != 1:
+                        raise CadError("PROFILE_INVALID", "El barrido necesita una región cerrada", path="args.profile")
+                    points = [tuple(evaluator.length(value, path=f"args.path.points[{i}][{j}]")
+                                    for j, value in enumerate(point)) for i, point in enumerate(args.path.points)]
+                    segments = [tuple(b - a for a, b in zip(start, end, strict=True))
+                                for start, end in pairwise(points)]
+                    if any(hypot(*vector) <= 1e-6 for vector in segments):
+                        raise CadError("PATH_INVALID", "La ruta contiene segmentos nulos o demasiado cortos",
+                                       path="args.path.points")
+                    normal = tuple(PLANES[profile_key["plane"]].z_dir)
+                    if abs(_dot3(points[0], normal) - profile_key["offset_mm"]) > 1e-6:
+                        raise CadError("PATH_NOT_ON_SKETCH", "La ruta debe comenzar en el plano del croquis",
+                                       path="args.path.points[0]")
+                    if abs(_dot3(segments[0], normal)) / hypot(*segments[0]) < 1 - 1e-6:
+                        raise CadError("PATH_NOT_NORMAL", "El primer segmento debe seguir la normal del croquis",
+                                       path="args.path.points[1]")
+
+                    def build_sweep(source=profile, positions=tuple(points), transition=args.path.transition):
+                        try:
+                            path = Polyline(*positions)
+                            return sweep(source, path=path, transition=Transition[transition.upper()])
+                        except Exception as exc:
+                            raise CadError("SWEEP_FAILED", "El kernel no pudo barrer el perfil",
+                                           path="args.path.points", hint=str(exc)) from exc
+
+                    definition = {"type": "sweep", "id": feature.id, "sketch": profile_key,
+                                  "profile": args.profile, "points_mm": points,
+                                  "transition": args.path.transition}
+                    shape = self._profile_solid(feature, args, build_sweep, definition, bodies, keys, owners, cache)
+                    if args.op != "new_body":
+                        owners.pop(args.target, None)
                 elif feature.type in ("fillet", "chamfer"):
                     args = (FilletArgs if feature.type == "fillet" else ChamferArgs).model_validate(feature.args)
                     if args.target not in bodies:
@@ -276,6 +446,50 @@ class KernelAdapter:
                         shape, key = cache.get_or_build(definition, build_dressup)
                     bodies[args.target] = shape
                     keys[args.target] = key
+                elif feature.type == "shell":
+                    args = ShellArgs.model_validate(feature.args)
+                    if args.target not in bodies:
+                        raise CadError("UNKNOWN_BODY", "No existe el cuerpo a vaciar", path="args.target")
+                    thickness = positive(evaluator, args.thickness, "args.thickness")
+                    source = bodies[args.target]
+                    selected = select(source, "face", args.remove_faces, scope=args.target,
+                                      origin=owners.get(args.target))
+
+                    def build_shell(base=source, openings=tuple(selected), size=thickness, direction=args.direction):
+                        try:
+                            result = offset(base, amount=-size if direction == "inward" else size,
+                                            openings=list(openings))
+                        except Exception as exc:
+                            raise CadError("SHELL_FAILED", "El kernel no pudo vaciar el cuerpo",
+                                           path="args.thickness", hint=str(exc)) from exc
+                        if not result.is_valid or len(result.solids()) != 1 or result.volume <= 0:
+                            raise CadError("SHELL_FAILED", "El espesor produjo una geometría inválida",
+                                           path="args.thickness", hint="Reduce el espesor o cambia las caras abiertas")
+                        if direction == "inward":
+                            changed = base.volume - result.volume > max(1e-7, base.volume * 1e-9)
+                        else:
+                            old, new = base.bounding_box(), result.bounding_box()
+                            changed = any(a - b > 1e-6 for a, b in zip(old.min, new.min, strict=True)) or any(
+                                b - a > 1e-6 for a, b in zip(old.max, new.max, strict=True)
+                            )
+                        if not changed:
+                            raise CadError("SHELL_FAILED", "El espesor no produjo un cascarón",
+                                           path="args.thickness", hint="Reduce el espesor o cambia las caras abiertas")
+                        return result
+
+                    previous = keys[args.target]
+                    definition = {"type": "shell", "id": feature.id, "target_key": previous,
+                                  "remove_faces": args.remove_faces.model_dump(mode="json", exclude_none=True),
+                                  "thickness_mm": thickness, "direction": args.direction}
+                    if cache is None or previous is None:
+                        shape, key = build_shell(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_shell)
+                    bodies[args.target] = shape
+                    keys[args.target] = key
+                    # El aro de una abertura puede ocupar el lugar de la antigua
+                    # tapadera: bbox y normal NO demuestran su procedencia.
+                    owners.pop(args.target, None)
                 elif feature.type in FEATURE_HANDLERS:
                     shape = FEATURE_HANDLERS[feature.type](feature, bodies, evaluator)
                     # Un plugin puede modificar cualquier cuerpo: evitar resultados obsoletos.

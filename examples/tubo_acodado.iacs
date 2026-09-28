@@ -1,0 +1,7 @@
+# Tubo hueco en L: el barrido sigue dos tramos 3D con esquina a inglete (right).
+param.set radio_exterior=4mm radio_interior=2mm altura=10mm salida=20mm
+sketch.new id=seccion plane=XY
+sketch.circle sketch=seccion id=exterior center='[0,0]' radius=radio_exterior
+sketch.circle sketch=seccion id=hueco center='[0,0]' radius=radio_interior
+feature.sweep id=codo profile=seccion path='{"points":[[0,0,0],[0,0,"altura"],["salida",0,"altura"]],"transition":"right"}' body=principal
+check.add id=solido type=valid_solid target=principal
