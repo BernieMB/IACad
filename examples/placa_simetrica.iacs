@@ -1,0 +1,8 @@
+# Media placa en L reflejada sobre el plano YZ y fusionada con su copia.
+param.set tramo=20mm base=6mm cuello=8mm alto=15mm espesor=4mm
+sketch.new id=perfil plane=XY
+sketch.polyline sketch=perfil id=contorno points='[[0,0],["tramo",0],["tramo","base"],["cuello","base"],["cuello","alto"],[0,"alto"]]'
+feature.extrude id=mitad profile=perfil distance=espesor body=principal
+feature.mirror id=espejo source=principal body=reflejado plane='{"origin":[0,0,0],"normal":[1,0,0]}'
+feature.boolean id=union op=union target=principal tools=reflejado
+check.add id=solido type=valid_solid target=principal

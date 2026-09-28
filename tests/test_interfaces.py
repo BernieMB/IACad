@@ -120,6 +120,80 @@ def test_cli_sweep_script_and_path_schema(tmp_path, monkeypatch):
     assert "path" in json.loads(help_result.stdout)["schema"]["properties"]
 
 
+def test_cli_slot_script_and_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("IACAD_WORKSPACE", str(tmp_path))
+    example = Path(__file__).resolve().parents[1] / "examples" / "placa_ranura.iacs"
+    (tmp_path / "ranura.iacs").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["new", "parts/ranura.iacad", "--name", "Placa ranurada"]).exit_code == 0
+    created = runner.invoke(app, ["exec", "parts/ranura.iacad", "--script", "ranura.iacs"])
+    assert created.exit_code == 0, created.output
+    expected = (60 * 30 - (24 - 6) * 6 - math.pi * 3**2) * 5
+    assert math.isclose(json.loads(created.stdout)["summary"]["volume_mm3"], expected, abs_tol=1e-5)
+    help_result = runner.invoke(app, ["help", "sketch.slot"])
+    assert help_result.exit_code == 0, help_result.output
+    assert {"length", "width", "angle", "center"} <= set(json.loads(help_result.stdout)["schema"]["properties"])
+
+
+def test_cli_polygon_script_and_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("IACAD_WORKSPACE", str(tmp_path))
+    example = Path(__file__).resolve().parents[1] / "examples" / "tuerca_hexagonal.iacs"
+    (tmp_path / "tuerca.iacs").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["new", "parts/tuerca.iacad", "--name", "Tuerca hexagonal"]).exit_code == 0
+    made = runner.invoke(app, ["exec", "parts/tuerca.iacad", "--script", "tuerca.iacs"])
+    assert made.exit_code == 0, made.output
+    expected = (150 * math.sqrt(3) - 16 * math.pi) * 6
+    assert math.isclose(json.loads(made.stdout)["summary"]["volume_mm3"], expected, abs_tol=1e-5)
+    polygon_help = runner.invoke(app, ["help", "sketch.polygon"])
+    assert polygon_help.exit_code == 0, polygon_help.output
+    assert {"side_count", "radius", "radius_type", "angle"} <= set(
+        json.loads(polygon_help.stdout)["schema"]["properties"]
+    )
+
+
+def test_cli_mirror_script_and_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("IACAD_WORKSPACE", str(tmp_path))
+    example = Path(__file__).resolve().parents[1] / "examples" / "placa_simetrica.iacs"
+    (tmp_path / "simetria.iacs").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["new", "parts/simetria.iacad", "--name", "Placa simétrica"]).exit_code == 0
+    made = runner.invoke(app, ["exec", "parts/simetria.iacad", "--script", "simetria.iacs"])
+    assert made.exit_code == 0, made.output
+    assert json.loads(made.stdout)["summary"]["volume_mm3"] == 1536
+    help_result = runner.invoke(app, ["help", "feature.mirror"])
+    assert help_result.exit_code == 0, help_result.output
+    assert {"source", "body", "plane"} <= set(json.loads(help_result.stdout)["schema"]["properties"])
+
+
+def test_cli_hole_script_and_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("IACAD_WORKSPACE", str(tmp_path))
+    example = Path(__file__).resolve().parents[1] / "examples" / "placa_taladros.iacs"
+    (tmp_path / "taladros.iacs").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["new", "parts/taladros.iacad", "--name", "Placa taladrada"]).exit_code == 0
+    made = runner.invoke(app, ["exec", "parts/taladros.iacad", "--script", "taladros.iacs"])
+    assert made.exit_code == 0, made.output
+    assert math.isclose(json.loads(made.stdout)["summary"]["volume_mm3"], 18_000 - 224 * math.pi, abs_tol=1e-5)
+    help_result = runner.invoke(app, ["help", "feature.hole"])
+    assert help_result.exit_code == 0, help_result.output
+    assert {"target", "diameter", "axis", "mode", "depth"} <= set(json.loads(help_result.stdout)["schema"]["properties"])
+
+
+def test_cli_split_script_and_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("IACAD_WORKSPACE", str(tmp_path))
+    example = Path(__file__).resolve().parents[1] / "examples" / "placa_cortada.iacs"
+    (tmp_path / "recorte.iacs").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    runner = CliRunner()
+    assert runner.invoke(app, ["new", "parts/recorte.iacad", "--name", "Placa cortada"]).exit_code == 0
+    made = runner.invoke(app, ["exec", "parts/recorte.iacad", "--script", "recorte.iacs"])
+    assert made.exit_code == 0, made.output
+    assert json.loads(made.stdout)["summary"]["volume_mm3"] == 7500
+    help_result = runner.invoke(app, ["help", "feature.split"])
+    assert help_result.exit_code == 0, help_result.output
+    assert {"target", "plane", "keep"} <= set(json.loads(help_result.stdout)["schema"]["properties"])
+
+
 def test_mcp_stdio_can_create_edit_and_query(tmp_path):
     async def exchange():
         params = StdioServerParameters(
@@ -225,6 +299,44 @@ def test_mcp_stdio_can_create_edit_and_query(tmp_path):
             tube = await client.call_tool("exec", {"doc": "parts/tubo.iacad", "script": sweep_script, "expected_revision": 0})
             assert not tube.isError
             assert math.isclose(tube.structuredContent["summary"]["volume_mm3"], 360 * math.pi, abs_tol=1e-5)
+            slot_help = await client.call_tool("help", {"topic": "sketch.slot"})
+            assert not slot_help.isError
+            slot_script = (Path(__file__).resolve().parents[1] / "examples" / "placa_ranura.iacs").read_text(encoding="utf-8")
+            await client.call_tool("session", {"action": "new", "doc": "parts/ranura.iacad", "name": "Ranura"})
+            plate = await client.call_tool("exec", {"doc": "parts/ranura.iacad", "script": slot_script})
+            assert not plate.isError
+            assert math.isclose(plate.structuredContent["summary"]["volume_mm3"],
+                                (60 * 30 - (24 - 6) * 6 - math.pi * 3**2) * 5, abs_tol=1e-5)
+            polygon_help = await client.call_tool("help", {"topic": "sketch.polygon"})
+            assert not polygon_help.isError
+            polygon_script = (Path(__file__).resolve().parents[1] / "examples" / "tuerca_hexagonal.iacs").read_text(encoding="utf-8")
+            await client.call_tool("session", {"action": "new", "doc": "parts/tuerca.iacad", "name": "Tuerca"})
+            nut = await client.call_tool("exec", {"doc": "parts/tuerca.iacad", "script": polygon_script})
+            assert not nut.isError
+            assert math.isclose(nut.structuredContent["summary"]["volume_mm3"],
+                                (150 * math.sqrt(3) - 16 * math.pi) * 6, abs_tol=1e-5)
+            mirror_help = await client.call_tool("help", {"topic": "feature.mirror"})
+            assert not mirror_help.isError
+            mirror_script = (Path(__file__).resolve().parents[1] / "examples" / "placa_simetrica.iacs").read_text(encoding="utf-8")
+            await client.call_tool("session", {"action": "new", "doc": "parts/simetria.iacad", "name": "Simetría"})
+            mirrored = await client.call_tool("exec", {"doc": "parts/simetria.iacad", "script": mirror_script})
+            assert not mirrored.isError
+            assert mirrored.structuredContent["summary"]["volume_mm3"] == 1536
+            hole_help = await client.call_tool("help", {"topic": "feature.hole"})
+            assert not hole_help.isError
+            hole_script = (Path(__file__).resolve().parents[1] / "examples" / "placa_taladros.iacs").read_text(encoding="utf-8")
+            await client.call_tool("session", {"action": "new", "doc": "parts/taladros.iacad", "name": "Taladros"})
+            drilled = await client.call_tool("exec", {"doc": "parts/taladros.iacad", "script": hole_script})
+            assert not drilled.isError
+            assert math.isclose(drilled.structuredContent["summary"]["volume_mm3"], 18_000 - 224 * math.pi,
+                                abs_tol=1e-5)
+            split_help = await client.call_tool("help", {"topic": "feature.split"})
+            assert not split_help.isError
+            split_script = (Path(__file__).resolve().parents[1] / "examples" / "placa_cortada.iacs").read_text(encoding="utf-8")
+            await client.call_tool("session", {"action": "new", "doc": "parts/recorte.iacad", "name": "Recorte"})
+            cropped = await client.call_tool("exec", {"doc": "parts/recorte.iacad", "script": split_script})
+            assert not cropped.isError
+            assert cropped.structuredContent["summary"]["volume_mm3"] == 7500
             assert (tmp_path / "parts/demo.iacad").exists()
 
     anyio.run(exchange)

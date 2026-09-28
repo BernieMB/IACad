@@ -1,0 +1,6 @@
+# Placa con un taladro pasante y otro ciego de fondo plano.
+param.set largo=60mm ancho=30mm espesor=10mm diametro=8mm profundidad=4mm
+feature.box id=base body=principal length=largo width=ancho height=espesor
+feature.hole id=pasante target=principal diameter=diametro axis='{"origin":[15,15,"espesor"],"dir":[0,0,-1]}'
+feature.hole id=ciego target=principal diameter=diametro axis='{"origin":[45,15,"espesor"],"dir":[0,0,-1]}' mode=blind depth=profundidad
+check.add id=solido type=valid_solid target=principal

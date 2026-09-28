@@ -1,0 +1,8 @@
+# Placa con una ranura inclinada de extremos semicirculares.
+param.set largo=60mm ancho=30mm espesor=5mm ranura_l=24mm ranura_a=6mm
+param.set name=giro value=30deg kind=angle
+sketch.new id=perfil plane=XY
+sketch.rectangle sketch=perfil id=exterior center=[30,15] width=largo height=ancho
+sketch.slot sketch=perfil id=ranura center=[30,15] length=ranura_l width=ranura_a angle=giro
+feature.extrude id=placa profile=perfil distance=espesor body=principal
+check.add id=solido type=valid_solid target=principal

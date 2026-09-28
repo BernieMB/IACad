@@ -56,14 +56,19 @@ def origins(document: PartDocument) -> dict[str, tuple[str, str]]:
         args = feature.args
         if feature.type in ("box", "cylinder") or (feature.type in ("extrude", "revolve", "loft", "sweep") and args["op"] == "new_body"):
             result[args["body"]] = (feature.id, feature.type)
-        elif feature.type == "boolean" and not args["keep_tools"]:
-            for tool in args["tools"]:
-                result.pop(tool, None)
+        elif feature.type == "boolean":
+            if args["op"] != "cut":
+                result.pop(args["target"], None)
+            if not args["keep_tools"]:
+                for tool in args["tools"]:
+                    result.pop(tool, None)
+        elif feature.type == "mirror":
+            result.pop(args["body"], None)
         elif feature.type in ("pattern_linear", "pattern_circular"):
             result.pop(args["target"], None)
             if not args["keep_tool"]:
                 result.pop(args["source"], None)
-        elif feature.type in ("shell", "sweep"):
+        elif feature.type in ("shell", "sweep", "hole", "split"):
             result.pop(args["target"], None)
         elif feature.type not in ("sketch", "extrude", "revolve", "loft", "sweep", "fillet", "chamfer", "shell", "boolean", "pattern_linear", "pattern_circular"):
             # Un plugin puede modificar cualquier cuerpo: no atribuirle caras de origen.

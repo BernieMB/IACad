@@ -1,6 +1,6 @@
 # IACad
 
-CAD paramétrico **sin interfaz de edición** para agentes que trabajan desde OpenCode. Ya permite crear proyectos con requisitos y piezas con primitivas, extrusión, revolución, loft o barrido de croquis 2D, vaciado y patrones lineales/circulares de sólidos, y exportación a STEP/STL/3MF/GLB. El historial editable se guarda en `.iacad` (JSON); los sólidos exportados y las mallas son derivados.
+CAD paramétrico **sin interfaz de edición** para agentes que trabajan desde OpenCode. Ya permite crear proyectos con requisitos y piezas con primitivas, croquis con ranuras y polígonos regulares, extrusión, revolución, loft o barrido de croquis 2D, taladros ciegos/pasantes, corte por plano, espejo de cuerpos, vaciado y patrones lineales/circulares de sólidos, y exportación a STEP/STL/3MF/GLB. El historial editable se guarda en `.iacad` (JSON); los sólidos exportados y las mallas son derivados.
 
 El diseño y las fases previstas están en [doc/Planning.md](doc/Planning.md), [doc/Modelo.md](doc/Modelo.md) y [doc/Requisitos.md](doc/Requisitos.md). Consulta [doc/Estado.md](doc/Estado.md) para saber exactamente qué funcionalidades ya funcionan.
 
@@ -38,7 +38,27 @@ uv run iacad query parts/soporte.iacad summary
 uv run iacad export parts/soporte.iacad --format step --out out/soporte.step
 ```
 
-`examples/placa_croquis.iacs` dibuja un rectángulo y un círculo interior en XY y extruye la placa con el orificio en una sola operación; `examples/perfil_l.iacs` dibuja un perfil en XZ y lo extruye simétricamente (normal del plano: **−Y**). En cada croquis se admite **un exterior y huecos interiores cerrados**; restricciones geométricas, varios perfiles exteriores y referencias a caras son posteriores.
+`examples/placa_croquis.iacs` dibuja un rectángulo y un círculo interior en XY y extruye la placa con el orificio en una sola operación; `examples/perfil_l.iacs` dibuja un perfil en XZ y lo extruye simétricamente (normal del plano: **−Y**). En cada croquis se admite **un exterior y huecos interiores cerrados** (rectángulos, círculos, polilíneas, ranuras o polígonos regulares); restricciones geométricas, varios perfiles exteriores y referencias a caras son posteriores.
+
+### Ranura paramétrica (orificio alargado)
+
+```powershell
+uv run iacad new parts/ranura.iacad --name "Placa ranurada"
+uv run iacad exec parts/ranura.iacad --script examples/placa_ranura.iacs
+uv run iacad export parts/ranura.iacad --format step --out out/ranura.step
+```
+
+`sketch.slot sketch=perfil id=ranura center='[30,15]' length=ranura_l width=ranura_a angle=giro` crea un contorno cerrado con dos extremos semicirculares. `length` es la **longitud total exterior** de la ranura, `width` es su anchura y el diámetro de cada extremo; requiere `length > width > 0`. `center` son las coordenadas **locales del croquis**; `angle` gira la ranura en su plano desde el eje local X (predeterminado `0 deg`) y admite expresiones/`param.set kind=angle`. Puede ser el contorno exterior o un hueco dentro de otro contorno, en XY/XZ/YZ y con offset. El ejemplo hace una placa 60 × 30 × 5 mm con ranura de 24 × 6 mm a 30° y volumen exacto `(1800−108−9π)·5 mm³`.
+
+### Polígono regular (tuerca hexagonal)
+
+```powershell
+uv run iacad new parts/tuerca.iacad --name "Tuerca hexagonal"
+uv run iacad exec parts/tuerca.iacad --script examples/tuerca_hexagonal.iacs
+uv run iacad export parts/tuerca.iacad --format step --out out/tuerca.step
+```
+
+`sketch.polygon sketch=perfil id=hexagono side_count=6 radius=radio angle=giro` crea un contorno cerrado de **3 a 64 lados**. `radius` es un circunradio (del centro a cada vértice) por defecto; con `radius_type=inradius` indica la apotema (centro a cada lado). `center` usa coordenadas locales del croquis, predeterminado `[0,0]`; `angle` gira el **primer vértice** desde +X local, predeterminado `0 deg`. Radio y ángulo admiten parámetros con unidades; `side_count` es un entero explícito en la definición del croquis. Se puede usar como exterior o como hueco, en XY/XZ/YZ con offset. El ejemplo extruye un hexágono de R10 mm y espesor 6 mm con agujero pasante R4 mm; volumen exacto `(150√3−16π)·6 mm³`.
 
 ### Revolución de un croquis (casquillo)
 
@@ -95,6 +115,36 @@ uv run iacad export parts/brida.iacad --format step --out out/brida.step
 ```
 
 `feature.pattern_circular` también repite un **cuerpo-herramienta** contra `target`, con `op=cut|join`, `count=2..64`, `axis={"origin":[0,0,0],"dir":[0,0,1]}` global y `angle` parametrizable en grados o radianes. El eje no necesita estar dentro de un croquis, pero sí debe ser finito y no nulo. Con `angle=360 deg`, el paso es `360/count` y **no** se duplica la primera copia en 360°; con un arco menor se incluyen los dos extremos (`angle/(count-1)`). La herramienta original es la primera instancia, y se consume salvo `keep_tool=true`. El ejemplo hace 4 taladros R2 sobre un círculo de pernos R15 en una placa de 50 × 50 × 5 mm: volumen `12500−80π mm³`. Se comprueban efectos y validez de cada copia; si no corta o une, se revierte todo.
+
+### Taladros directos pasantes y ciegos
+
+```powershell
+uv run iacad new parts/taladros.iacad --name "Placa taladrada"
+uv run iacad exec parts/taladros.iacad --script examples/placa_taladros.iacs
+uv run iacad export parts/taladros.iacad --format step --out out/taladros.step
+```
+
+`feature.hole id=pasante target=principal diameter="8 mm" axis='{"origin":[15,15,10],"dir":[0,0,-1]}'` resta un cilindro sobre un **eje global explícito**. `diameter` debe ser positivo; `axis.origin` admite coordenadas o parámetros de longitud y `axis.dir` es un vector 3D finito, sin unidades y no nulo (se normaliza). `mode=through` predeterminado prolonga la herramienta en ambos sentidos a través de toda la caja envolvente del cuerpo: el origen puede estar sobre una cara o en el interior. `mode=blind depth="4 mm"` mide la profundidad **desde el origen hacia `dir`** y crea un fondo plano; sitúa el origen en la cara de entrada. Si la profundidad supera el espesor local, el corte puede atravesar la pieza. Si el taladro no corta o divide el cuerpo en varios sólidos, falla y no se guarda. El ejemplo de placa 60 × 30 × 10 mm con un taladro Ø8 pasante y otro de 4 mm de profundidad tiene volumen exacto **`18000−224π mm³`**. Tras taladrar, las referencias semánticas anteriores del cuerpo dejan de atribuirse; consulta `topology` antes de seleccionar caras/aristas.
+
+### Corte paramétrico por plano (conservar un lado)
+
+```powershell
+uv run iacad new parts/recorte.iacad --name "Placa recortada"
+uv run iacad exec parts/recorte.iacad --script examples/placa_cortada.iacs
+uv run iacad export parts/recorte.iacad --format step --out out/recorte.step
+```
+
+`feature.split id=recorte target=principal plane='{"origin":[20,0,0],"normal":[1,0,1]}' keep=positive` corta **todo el sólido** con un plano global: `origin` admite longitudes y parámetros; `normal` es un vector 3D finito, sin unidades y no nulo (se normaliza). `positive` (predeterminado) conserva los puntos donde `dot(normal, punto−origin) ≥ 0`; `negative` conserva el lado contrario. El resultado **sustituye al cuerpo `target`** y mantiene su ID, por lo que sigue siendo exportable como un único cuerpo; la mitad descartada no se guarda. Se rechazan planos fuera del sólido, lados vacíos y resultados con varios sólidos, con rollback. El ejemplo recorta una caja 40 × 30 × 10 mm con `x+z=20`: volumen **7500 mm³**, bbox X **10..40 mm**. Tras recortar se invalidan las referencias semánticas anteriores del destino; vuelve a consultar `topology`.
+
+### Espejo de un cuerpo respecto de un plano
+
+```powershell
+uv run iacad new parts/simetria.iacad --name "Placa simétrica"
+uv run iacad exec parts/simetria.iacad --script examples/placa_simetrica.iacs
+uv run iacad export parts/simetria.iacad --format step --out out/simetria.step
+```
+
+`feature.mirror id=espejo source=principal body=reflejado plane='{"origin":[0,0,0],"normal":[1,0,0]}'` refleja **todo el sólido** sobre el plano global que pasa por `origin` y es perpendicular a `normal` (vector 3D finito, sin unidades y no nulo; se normaliza). Las coordenadas de `origin` aceptan parámetros de longitud. El original **se conserva** y el espejo recibe un ID de cuerpo nuevo, sin nombres topológicos heredados; ambos pueden combinarse con `feature.boolean` (`op=union|cut|intersect`). El ejemplo refleja una media placa sobre YZ (`x=0`) y hace `op=union`, con volumen exacto **1536 mm³**. Para exportar STEP/STL/3MF/GLB en esta fase debe quedar **un solo cuerpo**. Tras unir o intersectar cuerpos, vuelve a consultar la topología: los nombres de origen del destino se invalidan para no atribuir a la pieza original caras creadas por la copia.
 
 ### Vaciado de un sólido (caja abierta)
 

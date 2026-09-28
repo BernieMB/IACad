@@ -22,7 +22,14 @@ from iacad.model import (
     StrictModel,
 )
 from iacad.naming import Selection
-from iacad.sketch import CircleEntity, Polyline, RectangleEntity, SketchDefinition
+from iacad.sketch import (
+    CircleEntity,
+    Polyline,
+    RectangleEntity,
+    RegularPolygonEntity,
+    SketchDefinition,
+    SlotEntity,
+)
 
 
 class ParamSet(StrictModel):
@@ -57,6 +64,31 @@ class BooleanArgs(StrictModel):
     target: str = Field(pattern=ID_PATTERN)
     tools: list[str] = Field(min_length=1)
     keep_tools: bool = False
+
+
+class MirrorPlane(StrictModel):
+    origin: tuple[Quantity, Quantity, Quantity] = (0.0, 0.0, 0.0)
+    normal: tuple[float, float, float]
+
+    @model_validator(mode="after")
+    def valid_normal(self) -> "MirrorPlane":
+        norm = hypot(*self.normal)
+        if not all(isfinite(value) for value in self.normal) or not isfinite(norm) or norm <= 1e-6:
+            raise ValueError("La normal del plano debe ser finita y no nula")
+        return self
+
+
+class MirrorArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    source: str = Field(pattern=ID_PATTERN)
+    body: str = Field(pattern=ID_PATTERN)
+    plane: MirrorPlane
+
+    @model_validator(mode="after")
+    def separate_output(self) -> "MirrorArgs":
+        if self.source == self.body:
+            raise ValueError("El cuerpo reflejado debe tener un ID distinto del original")
+        return self
 
 
 class PatternLinearArgs(StrictModel):
@@ -119,6 +151,14 @@ class SketchCircleArgs(CircleEntity):
 
 
 class SketchRectangleArgs(RectangleEntity):
+    sketch: str = Field(pattern=ID_PATTERN)
+
+
+class SketchSlotArgs(SlotEntity):
+    sketch: str = Field(pattern=ID_PATTERN)
+
+
+class SketchPolygonArgs(RegularPolygonEntity):
     sketch: str = Field(pattern=ID_PATTERN)
 
 
@@ -216,6 +256,30 @@ class SweepArgs(StrictModel):
         if self.op != "new_body" and (not self.target or self.body):
             raise ValueError("join/cut/intersect requieren target y prohíben body")
         return self
+
+
+class HoleArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    target: str = Field(pattern=ID_PATTERN)
+    diameter: Quantity
+    axis: RevolveAxis
+    mode: Literal["through", "blind"] = "through"
+    depth: Quantity | None = None
+
+    @model_validator(mode="after")
+    def valid_depth(self) -> "HoleArgs":
+        if self.mode == "blind" and self.depth is None:
+            raise ValueError("El taladro ciego requiere depth")
+        if self.mode == "through" and self.depth is not None:
+            raise ValueError("El taladro pasante no admite depth")
+        return self
+
+
+class SplitArgs(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    target: str = Field(pattern=ID_PATTERN)
+    plane: MirrorPlane
+    keep: Literal["positive", "negative"] = "positive"
 
 
 class FilletArgs(StrictModel):
@@ -343,6 +407,23 @@ def feature_boolean(doc: PartDocument, args: BooleanArgs) -> str:
 
 
 @register(
+    "feature.mirror", MirrorArgs, "Crea un cuerpo nuevo reflejado sobre un plano global; conserva el original.",
+    {"id": "reflejo", "source": "principal", "body": "simetrico",
+     "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}},
+)
+def feature_mirror(doc: PartDocument, args: MirrorArgs) -> str:
+    if any(feature.id == args.id for feature in doc.features):
+        raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
+    if args.source not in {body.id for body in doc.bodies}:
+        raise CadError("UNKNOWN_BODY", "El espejo requiere un cuerpo original existente", path="args.source")
+    if args.body in {body.id for body in doc.bodies}:
+        raise CadError("DUPLICATE_ID", "El cuerpo reflejado ya existe", path="args.body")
+    doc.features.append(Feature(id=args.id, type="mirror", args=args.model_dump()))
+    doc.bodies.append(Body(id=args.body))
+    return args.id
+
+
+@register(
     "feature.pattern_linear", PatternLinearArgs,
     "Repite un cuerpo-herramienta contra un destino (cut/join); incluye la posición original.",
     {"id": "perforaciones", "source": "broca", "target": "principal", "op": "cut", "count": 4,
@@ -399,7 +480,7 @@ def sketch_new(doc: PartDocument, args: SketchNewArgs) -> str:
     return args.id
 
 
-def add_entity(doc: PartDocument, args: SketchPolylineArgs | SketchCircleArgs | SketchRectangleArgs) -> str:
+def add_entity(doc: PartDocument, args: SketchPolylineArgs | SketchCircleArgs | SketchRectangleArgs | SketchSlotArgs | SketchPolygonArgs) -> str:
     sketch = next((feature for feature in doc.features if feature.id == args.sketch and feature.type == "sketch"), None)
     if sketch is None:
         raise CadError("UNKNOWN_SKETCH", "El croquis no existe", path="args.sketch")
@@ -430,6 +511,23 @@ def sketch_circle(doc: PartDocument, args: SketchCircleArgs) -> str:
     {"sketch": "perfil", "id": "exterior", "center": [20, 15], "width": "40 mm", "height": "30 mm"},
 )
 def sketch_rectangle(doc: PartDocument, args: SketchRectangleArgs) -> str:
+    return add_entity(doc, args)
+
+
+@register(
+    "sketch.slot", SketchSlotArgs, "Añade ranura cerrada por longitud total, ancho y giro en su plano.",
+    {"sketch": "perfil", "id": "ranura", "center": [20, 15], "length": "20 mm", "width": "6 mm", "angle": "30 deg"},
+)
+def sketch_slot(doc: PartDocument, args: SketchSlotArgs) -> str:
+    return add_entity(doc, args)
+
+
+@register(
+    "sketch.polygon", SketchPolygonArgs, "Añade polígono regular cerrado de 3 a 64 lados con radio a vértices o lados.",
+    {"sketch": "perfil", "id": "hexagono", "center": [0, 0], "side_count": 6,
+     "radius": "10 mm", "radius_type": "circumradius", "angle": "0 deg"},
+)
+def sketch_polygon(doc: PartDocument, args: SketchPolygonArgs) -> str:
     return add_entity(doc, args)
 
 
@@ -469,6 +567,24 @@ def feature_sweep(doc: PartDocument, args: SweepArgs) -> str:
     return add_profile_feature(doc, args, "sweep")
 
 
+@register(
+    "feature.hole", HoleArgs, "Taladra un cuerpo sobre un eje global: pasante o ciego de fondo plano.",
+    {"id": "taladro", "target": "principal", "diameter": "8 mm",
+     "axis": {"origin": [20, 15, 6], "dir": [0, 0, -1]}, "mode": "blind", "depth": "4 mm"},
+)
+def feature_hole(doc: PartDocument, args: HoleArgs) -> str:
+    return add_dressup(doc, args, "hole")
+
+
+@register(
+    "feature.split", SplitArgs, "Corta un cuerpo con un plano global y conserva el lado positivo o negativo.",
+    {"id": "recorte", "target": "principal", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 1]},
+     "keep": "positive"},
+)
+def feature_split(doc: PartDocument, args: SplitArgs) -> str:
+    return add_dressup(doc, args, "split")
+
+
 def add_profile_feature(doc: PartDocument, args: ExtrudeArgs | RevolveArgs | LoftArgs | SweepArgs, kind: str) -> str:
     if any(feature.id == args.id for feature in doc.features):
         raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
@@ -486,7 +602,7 @@ def add_profile_feature(doc: PartDocument, args: ExtrudeArgs | RevolveArgs | Lof
     return args.id
 
 
-def add_dressup(doc: PartDocument, args: FilletArgs | ChamferArgs | ShellArgs, kind: str) -> str:
+def add_dressup(doc: PartDocument, args: FilletArgs | ChamferArgs | ShellArgs | HoleArgs | SplitArgs, kind: str) -> str:
     if any(feature.id == args.id for feature in doc.features):
         raise CadError("DUPLICATE_ID", "Ya existe una feature con ese ID", path="args.id")
     if args.target not in {body.id for body in doc.bodies}:

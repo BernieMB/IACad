@@ -1,0 +1,5 @@
+# Placa recortada por el lado positivo de un plano oblicuo global.
+param.set largo=40mm ancho=30mm espesor=10mm posicion=20mm
+feature.box id=base body=principal length=largo width=ancho height=espesor
+feature.split id=recorte target=principal plane='{"origin":["posicion",0,0],"normal":[1,0,1]}' keep=positive
+check.add id=solido type=valid_solid target=principal

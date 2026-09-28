@@ -1,7 +1,7 @@
 """Adaptador mínimo del kernel: B-Rep exacto sin API de build123d expuesta a agentes."""
 
 from collections.abc import Callable, Iterable, Mapping
-from itertools import pairwise
+from itertools import pairwise, product
 from math import hypot
 from pathlib import Path
 
@@ -10,7 +10,9 @@ from build123d import (
     Axis,
     Box,
     Cylinder,
+    Keep,
     Mesher,
+    Plane,
     Polyline,
     Pos,
     Shape,
@@ -23,8 +25,10 @@ from build123d import (
     extrude,
     fillet,
     loft,
+    mirror,
     offset,
     revolve,
+    split,
     sweep,
 )
 
@@ -36,11 +40,14 @@ from iacad.commands import (
     CylinderArgs,
     ExtrudeArgs,
     FilletArgs,
+    HoleArgs,
     LoftArgs,
+    MirrorArgs,
     PatternCircularArgs,
     PatternLinearArgs,
     RevolveArgs,
     ShellArgs,
+    SplitArgs,
     SweepArgs,
 )
 from iacad.errors import CadError
@@ -220,6 +227,8 @@ class KernelAdapter:
                         )
                     bodies[args.target] = shape
                     keys[args.target] = key
+                    if args.op != "cut":
+                        owners.pop(args.target, None)
                     if not args.keep_tools:
                         for tool in args.tools:
                             del bodies[tool]
@@ -290,6 +299,35 @@ class KernelAdapter:
                         del bodies[args.source]
                         del keys[args.source]
                         owners.pop(args.source, None)
+                elif feature.type == "mirror":
+                    args = MirrorArgs.model_validate(feature.args)
+                    if args.source not in bodies:
+                        raise CadError("UNKNOWN_BODY", "No existe el cuerpo original", path="args.source")
+                    if args.body in bodies:
+                        raise CadError("DUPLICATE_ID", "El cuerpo reflejado ya existe", path="args.body")
+                    origin = tuple(evaluator.length(value, path=f"args.plane.origin[{i}]")
+                                   for i, value in enumerate(args.plane.origin))
+                    norm = hypot(*args.plane.normal)
+                    normal = tuple(value / norm for value in args.plane.normal)
+
+                    def build_mirror(source=bodies[args.source], position=origin, direction=normal):
+                        try:
+                            return mirror(source, about=Plane(origin=position, z_dir=direction))
+                        except Exception as exc:
+                            raise CadError("MIRROR_FAILED", "El kernel no pudo reflejar el cuerpo",
+                                           path="args.plane", hint=str(exc)) from exc
+
+                    source_key = keys[args.source]
+                    definition = {"type": "mirror", "id": feature.id, "source_key": source_key,
+                                  "plane_origin_mm": origin, "plane_normal": normal}
+                    if cache is None or source_key is None:
+                        shape, key = build_mirror(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_mirror)
+                    bodies[args.body] = shape
+                    keys[args.body] = key
+                    # Los nombres topológicos del original no se transfieren a una copia reflejada.
+                    owners.pop(args.body, None)
                 elif feature.type == "extrude":
                     args = ExtrudeArgs.model_validate(feature.args)
                     if args.profile not in sketches:
@@ -421,6 +459,99 @@ class KernelAdapter:
                     shape = self._profile_solid(feature, args, build_sweep, definition, bodies, keys, owners, cache)
                     if args.op != "new_body":
                         owners.pop(args.target, None)
+                elif feature.type == "hole":
+                    args = HoleArgs.model_validate(feature.args)
+                    if args.target not in bodies:
+                        raise CadError("UNKNOWN_BODY", "No existe el cuerpo a taladrar", path="args.target")
+                    diameter = positive(evaluator, args.diameter, "args.diameter")
+                    depth = positive(evaluator, args.depth, "args.depth") if args.mode == "blind" else None
+                    origin = tuple(evaluator.length(value, path=f"args.axis.origin[{i}]")
+                                   for i, value in enumerate(args.axis.origin))
+                    norm = hypot(*args.axis.dir)
+                    direction = tuple(value / norm for value in args.axis.dir)
+                    source = bodies[args.target]
+                    if depth is None:
+                        bounds = source.bounding_box()
+                        projections = [
+                            _dot3(tuple(point[i] - origin[i] for i in range(3)), direction)
+                            for point in product((bounds.min.X, bounds.max.X),
+                                                 (bounds.min.Y, bounds.max.Y),
+                                                 (bounds.min.Z, bounds.max.Z))
+                        ]
+                        margin = max(1e-3, (max(projections) - min(projections)) * 1e-6)
+                        start = min(projections) - margin
+                        length = max(projections) - min(projections) + 2 * margin
+                    else:
+                        start, length = 0.0, depth
+
+                    def build_hole(base=source, position=origin, vector=direction,
+                                   offset_mm=start, height=length, radius=diameter / 2):
+                        try:
+                            tool_origin = tuple(position[i] + offset_mm * vector[i] for i in range(3))
+                            tool = Plane(origin=tool_origin, z_dir=vector) * Cylinder(
+                                radius, height, align=(Align.CENTER, Align.CENTER, Align.MIN)
+                            )
+                            result = base - tool
+                        except Exception as exc:
+                            raise CadError("HOLE_FAILED", "El kernel no pudo taladrar el cuerpo",
+                                           path="args.axis", hint=str(exc)) from exc
+                        if not result.is_valid or len(result.solids()) != 1 or result.volume <= 0:
+                            raise CadError("HOLE_FAILED", "El taladro no deja un sólido único y válido",
+                                           path="args.diameter", hint="Reduce el diámetro o cambia el eje")
+                        if base.volume - result.volume <= max(1e-7, base.volume * 1e-9):
+                            raise CadError("HOLE_NO_EFFECT", "El taladro no intersecta el cuerpo",
+                                           path="args.axis", hint="Comprueba el origen y la dirección")
+                        return result
+
+                    previous = keys[args.target]
+                    definition = {"type": "hole", "id": feature.id, "target_key": previous,
+                                  "diameter_mm": diameter, "axis_origin_mm": origin, "axis_dir": direction,
+                                  "mode": args.mode, "depth_mm": depth, "start_mm": start, "length_mm": length}
+                    if cache is None or previous is None:
+                        shape, key = build_hole(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_hole)
+                    bodies[args.target] = shape
+                    keys[args.target] = key
+                    owners.pop(args.target, None)
+                elif feature.type == "split":
+                    args = SplitArgs.model_validate(feature.args)
+                    if args.target not in bodies:
+                        raise CadError("UNKNOWN_BODY", "No existe el cuerpo a cortar", path="args.target")
+                    origin = tuple(evaluator.length(value, path=f"args.plane.origin[{i}]")
+                                   for i, value in enumerate(args.plane.origin))
+                    norm = hypot(*args.plane.normal)
+                    direction = tuple(value / norm for value in args.plane.normal)
+                    source = bodies[args.target]
+
+                    def build_split(base=source, position=origin, vector=direction, keep=args.keep):
+                        try:
+                            result = split(base, bisect_by=Plane(origin=position, z_dir=vector),
+                                           keep=Keep.TOP if keep == "positive" else Keep.BOTTOM)
+                        except Exception as exc:
+                            raise CadError("SPLIT_FAILED", "El kernel no pudo cortar el cuerpo",
+                                           path="args.plane", hint=str(exc)) from exc
+                        if result is None or len(result.solids()) == 0 or result.volume <= 0:
+                            raise CadError("SPLIT_EMPTY", "El lado elegido no contiene un sólido",
+                                           path="args.keep", hint="Mueve el plano o elige el lado contrario")
+                        if not result.is_valid or len(result.solids()) != 1:
+                            raise CadError("SPLIT_FAILED", "El corte no produce un sólido único y válido",
+                                           path="args.plane", hint="Mueve el plano o cambia el cuerpo")
+                        if base.volume - result.volume <= max(1e-7, base.volume * 1e-9):
+                            raise CadError("SPLIT_NO_EFFECT", "El plano no recorta el cuerpo",
+                                           path="args.plane", hint="Mueve el plano hacia el interior del sólido")
+                        return result
+
+                    previous = keys[args.target]
+                    definition = {"type": "split", "id": feature.id, "target_key": previous,
+                                  "plane_origin_mm": origin, "plane_normal": direction, "keep": args.keep}
+                    if cache is None or previous is None:
+                        shape, key = build_split(), None
+                    else:
+                        shape, key = cache.get_or_build(definition, build_split)
+                    bodies[args.target] = shape
+                    keys[args.target] = key
+                    owners.pop(args.target, None)
                 elif feature.type in ("fillet", "chamfer"):
                     args = (FilletArgs if feature.type == "fillet" else ChamferArgs).model_validate(feature.args)
                     if args.target not in bodies:

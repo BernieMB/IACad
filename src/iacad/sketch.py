@@ -2,7 +2,17 @@
 
 from typing import Annotated, Literal
 
-from build123d import Align, Circle, Plane, Polygon, Pos, Rectangle, Sketch
+from build123d import (
+    Align,
+    Circle,
+    Plane,
+    Polygon,
+    Pos,
+    Rectangle,
+    RegularPolygon,
+    Sketch,
+    SlotOverall,
+)
 from pydantic import Field, model_validator
 
 from iacad.errors import CadError
@@ -35,7 +45,28 @@ class RectangleEntity(StrictModel):
     height: Quantity
 
 
-SketchEntity = Annotated[Polyline | CircleEntity | RectangleEntity, Field(discriminator="type")]
+class SlotEntity(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    type: Literal["slot"] = "slot"
+    center: Point2 = (0.0, 0.0)
+    length: Quantity
+    width: Quantity
+    angle: Quantity = "0 deg"
+
+
+class RegularPolygonEntity(StrictModel):
+    id: str = Field(pattern=ID_PATTERN)
+    type: Literal["polygon"] = "polygon"
+    center: Point2 = (0.0, 0.0)
+    side_count: int = Field(ge=3, le=64)
+    radius: Quantity
+    radius_type: Literal["circumradius", "inradius"] = "circumradius"
+    angle: Quantity = "0 deg"
+
+
+SketchEntity = Annotated[
+    Polyline | CircleEntity | RectangleEntity | SlotEntity | RegularPolygonEntity, Field(discriminator="type")
+]
 
 
 class SketchDefinition(StrictModel):
@@ -76,13 +107,35 @@ def resolve(definition: SketchDefinition, evaluator: QuantityEvaluator) -> tuple
                 raise CadError("INVALID_DIMENSION", "El radio debe ser positivo", path=entity.id)
             shape = Pos(*center) * Circle(radius)
             geometry = {"type": "circle", "id": entity.id, "center_mm": center, "radius_mm": radius}
-        else:
+        elif isinstance(entity, RectangleEntity):
             center = tuple(evaluator.length(coord) for coord in entity.center)
             width, height = evaluator.length(entity.width), evaluator.length(entity.height)
             if width <= 0 or height <= 0:
                 raise CadError("INVALID_DIMENSION", "El rectángulo requiere ancho y alto positivos", path=entity.id)
             shape = Pos(*center) * Rectangle(width, height, align=(Align.CENTER, Align.CENTER))
             geometry = {"type": "rectangle", "id": entity.id, "center_mm": center, "width_mm": width, "height_mm": height}
+        elif isinstance(entity, SlotEntity):
+            center = tuple(evaluator.length(coord) for coord in entity.center)
+            length = evaluator.length(entity.length, path=f"{entity.id}.length")
+            width = evaluator.length(entity.width, path=f"{entity.id}.width")
+            angle = evaluator.angle(entity.angle, path=f"{entity.id}.angle")
+            if width <= 0 or length <= width:
+                raise CadError("INVALID_DIMENSION", "La ranura requiere longitud total mayor que ancho positivo", path=entity.id)
+            shape = Pos(*center) * SlotOverall(length, width, rotation=angle)
+            geometry = {"type": "slot", "id": entity.id, "center_mm": center,
+                        "length_mm": length, "width_mm": width, "angle_deg": angle}
+        else:
+            center = tuple(evaluator.length(coord) for coord in entity.center)
+            radius = evaluator.length(entity.radius, path=f"{entity.id}.radius")
+            angle = evaluator.angle(entity.angle, path=f"{entity.id}.angle")
+            if radius <= 0:
+                raise CadError("INVALID_DIMENSION", "El polígono requiere radio positivo", path=entity.id)
+            shape = Pos(*center) * RegularPolygon(
+                radius, entity.side_count, major_radius=entity.radius_type == "circumradius", rotation=angle
+            )
+            geometry = {"type": "polygon", "id": entity.id, "center_mm": center,
+                        "side_count": entity.side_count, "radius_mm": radius,
+                        "radius_type": entity.radius_type, "angle_deg": angle}
         if not shape.is_valid or shape.area <= 0:
             raise CadError("PROFILE_INVALID", "Contorno 2D inválido", path=entity.id)
         shapes.append(shape)

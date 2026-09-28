@@ -1,0 +1,8 @@
+# Perfil de tuerca: hexágono regular extruido con taladro pasante.
+param.set radio=10mm taladro=4mm espesor=6mm
+param.set name=giro value=0deg kind=angle
+sketch.new id=perfil plane=XY
+sketch.polygon sketch=perfil id=hexagono side_count=6 radius=radio angle=giro
+sketch.circle sketch=perfil id=orificio center=[0,0] radius=taladro
+feature.extrude id=tuerca profile=perfil distance=espesor body=principal
+check.add id=solido type=valid_solid target=principal
